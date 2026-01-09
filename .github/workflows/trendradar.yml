@@ -1,0 +1,57 @@
+name: TrendRadar - English Only
+
+on:
+  schedule:
+    # 每天 UTC 00:00 运行（北京时间 08:00）
+    - cron: "0 0 * * *"
+  workflow_dispatch:  # 允许手动运行
+
+jobs:
+  run-trendradar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml requests feedparser beautifulsoup4 lxml
+
+      - name: Run TrendRadar
+        env:
+          TZ: "Asia/Shanghai"
+        run: |
+          mkdir -p output
+          python -c "
+import sys
+sys.path.insert(0, '.')
+exec(open('trendradar_main.py').read())
+"
+
+      - name: Save report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          destination_dir: ./reports
+          keep_files: true
+
+      - name: Send WeChat via ServerChan (optional)
+        if: success() && env.SCKEY != ''
+        env:
+          SCKEY: ${{ secrets.SCKEY }}
+        run: |
+          REPORT=$(ls output/report_*.html | head -n1)
+          if [ -f "$REPORT" ]; then
+            TITLE="TrendRadar 英文热点更新"
+            DESC="$(date '+%Y-%m-%d %H:%M') 北京时间"
+            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
+          fi
