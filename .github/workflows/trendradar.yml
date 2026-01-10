@@ -30,13 +30,13 @@ jobs:
 
       - name: Install and Start Docker
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker.io
+          # Use official Docker installation script to avoid containerd conflict on Ubuntu 24.04
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
           sudo systemctl start docker
           sudo usermod -aG docker $USER
-          # Re-login to apply group change (workaround for Actions)
-          echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$USER
-          sudo chmod 0440 /etc/sudoers.d/$USER
+          # Reload group membership (workaround for non-login shell)
+          newgrp docker
           docker --version
 
       - name: Run TrendRadar via Docker
