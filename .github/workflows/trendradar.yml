@@ -2,37 +2,38 @@ name: TrendRadar - English Only (Docker)
 
 on:
   schedule:
-    - cron: "0 0 * * *"  # UTC 00:00 = 北京时间 08:00
+    - cron: "0 0 * * *"  # 北京时间 08:00
   workflow_dispatch:
+
+# 必须添加权限声明
+permissions:
+  contents: write
+  pages: write
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create output directory
-        run: mkdir -p output
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Prepare Directories
+        run: |
+          mkdir -p output config
+          # 确保词频文件在挂载目录下
+          if [ -f "frequency_words.txt" ]; then cp frequency_words.txt config/; fi
 
       - name: Run TrendRadar via Docker
-        uses: docker/run-action@v2
-        with:
-          image: wantcat/trendradar:latest
-          args: >
-            --config /app/config/config.yaml
-            --output /app/output
-          env: |
-            TZ=Asia/Shanghai
-          volumes: |
-            ${{ github.workspace }}/config:/app/config:ro
-            ${{ github.workspace }}/output:/app/output
-          pull: true
+        # 使用原生 docker run 命令替换错误的 action
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config:ro \
+            -v ${{ github.workspace }}/output:/app/output \
+            -e TZ=Asia/Shanghai \
+            wantcat/trendradar:latest \
+            python main.py --config /app/config/config.yaml --output /app/output
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
@@ -44,13 +45,14 @@ jobs:
           keep_files: true
 
       - name: Send WeChat via ServerChan
-        if: success() && env.SCKEY != ''
+        if: success() && secrets.SCKEY != ''
         env:
           SCKEY: ${{ secrets.SCKEY }}
         run: |
-          REPORT=$(ls output/report_*.html | head -n1)
-          if [ -f "$REPORT" ]; then
-            TITLE="TrendRadar 英文热点更新"
-            DESC="$(date '+%Y-%m-%d %H:%M') 北京时间"
+          # 使用 find 命令递归查找生成的 HTML 报告
+          REPORT_PATH=$(find output -name "report_*.html" | head -n 1)
+          if [ -n "$REPORT_PATH" ]; then
+            TITLE="TrendRadar_English_Update"
+            DESC="New_report_generated_successfully"
             curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
           fi
