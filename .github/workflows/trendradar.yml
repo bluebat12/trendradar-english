@@ -17,19 +17,22 @@ jobs:
       - name: Create output directory
         run: mkdir -p output
 
-      - name: Install Docker
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker.io
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Run TrendRadar via Docker
-        run: |
-          sudo docker run --rm \
-            -v $PWD/config:/app/config:ro \
-            -v $PWD/output:/app/output \
-            -e TZ=Asia/Shanghai \
-            -w /app \
-            wantcat/trendradar:latest
+        uses: docker/run-action@v3
+        with:
+          image: wantcat/trendradar:latest
+          args: >
+            --config /app/config/config.yaml
+            --output /app/output
+          env: |
+            TZ=Asia/Shanghai
+          volumes: |
+            ${{ github.workspace }}/config:/app/config:ro
+            ${{ github.workspace }}/output:/app/output
+          pull: true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
