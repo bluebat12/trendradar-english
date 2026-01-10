@@ -1,14 +1,9 @@
+# config/config.yaml
+
 timezone: "Asia/Shanghai"
 
-platforms:
-  - id: "weibo_hot_search"
-    enabled: false
-  - id: "toutiao_hot"
-    enabled: false
-  - id: "zhihu_hot"
-    enabled: false
-  - id: "baidu_hot"
-    enabled: false
+# 完全禁用所有中文/国内平台
+platforms: []
 
 rss:
   enabled: true
@@ -27,11 +22,9 @@ rss:
 storage:
   backend: "local"
   local:
-    # 修改为容器内的绝对路径
     data_dir: "/app/output"
 
 report:
   mode: "daily"
 
-# 必须指向容器挂载后的绝对路径
 frequency_words_file: "/app/config/frequency_words.txt"
