@@ -23,7 +23,7 @@ jobs:
             -v $PWD/config:/app/config:ro \
             -v $PWD/output:/app/output \
             -e TZ=Asia/Shanghai \
-            wantcat/trendradar:v4.7.0
+            wantcat/trendradar:latest
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
