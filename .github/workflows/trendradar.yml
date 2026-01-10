@@ -21,7 +21,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Run TrendRadar via Docker
-        uses: docker/run@v3
+        uses: docker/run-action@v2
         with:
           image: wantcat/trendradar:latest
           args: >
