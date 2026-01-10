@@ -1,7 +1,7 @@
 name: TrendRadar - English Only (Docker)
 
 on:
-  workflow_dispatch:  # ✅ 只允许手动触发，防止自触发
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -10,7 +10,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15  # ✅ 延长到 15 分钟
 
     steps:
       - name: Checkout code
