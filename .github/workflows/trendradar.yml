@@ -21,18 +21,21 @@ jobs:
       - name: Prepare Directories
         run: |
           mkdir -p output config
-          if [ -f "frequency_words.txt" ]; then 
+          if [ -f "frequency_words.txt" ]; then
             cp frequency_words.txt config/
+          else
+            echo "Warning: frequency_words.txt not found."
           fi
 
-      # 👇 关键新增步骤：安装并启动 Docker
+      # 👇 关键：安装并启动 Docker
       - name: Install and Start Docker
         run: |
           sudo apt-get update
           sudo apt-get install -y docker.io
           sudo systemctl start docker
           sudo usermod -aG docker $USER
-          # 验证
+          # 等待用户组生效
+          newgrp docker
           docker --version
 
       - name: Run TrendRadar via Docker
@@ -41,8 +44,7 @@ jobs:
             -v ${{ github.workspace }}/config:/app/config:ro \
             -v ${{ github.workspace }}/output:/app/output \
             -e TZ=Asia/Shanghai \
-            wantcat/trendradar:latest \
-            python main.py --config /app/config/config.yaml --output /app/output
+            wantcat/trendradar:latest
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
