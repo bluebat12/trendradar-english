@@ -3,9 +3,8 @@ name: TrendRadar - English Only (Docker)
 on:
   schedule:
     - cron: "0 0 * * *"  # 北京时间 08:00
-  workflow_dispatch:
+  workflow_dispatch:     # 允许手动触发
 
-# 必须添加权限声明
 permissions:
   contents: write
   pages: write
@@ -21,12 +20,14 @@ jobs:
 
       - name: Prepare Directories
         run: |
+          # 创建必要目录并确保权限
           mkdir -p output config
-          # 确保词频文件在挂载目录下
-          if [ -f "frequency_words.txt" ]; then cp frequency_words.txt config/; fi
+          # 如果词频文件在根目录，复制到 config 文件夹供 Docker 挂载
+          if [ -f "frequency_words.txt" ]; then 
+            cp frequency_words.txt config/
+          fi
 
       - name: Run TrendRadar via Docker
-        # 使用原生 docker run 命令替换错误的 action
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/config:/app/config:ro \
@@ -49,10 +50,12 @@ jobs:
         env:
           SCKEY: ${{ secrets.SCKEY }}
         run: |
-          # 使用 find 命令递归查找生成的 HTML 报告
+          # 递归搜索生成的 HTML 报告路径
           REPORT_PATH=$(find output -name "report_*.html" | head -n 1)
           if [ -n "$REPORT_PATH" ]; then
             TITLE="TrendRadar_English_Update"
             DESC="New_report_generated_successfully"
             curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
+          else
+            echo "No report file found to notify."
           fi
