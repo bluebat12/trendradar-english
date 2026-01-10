@@ -26,6 +26,7 @@ jobs:
             -v ${{ github.workspace }}/config:/app/config:ro \
             -v ${{ github.workspace }}/output:/app/output \
             -e TZ=Asia/Shanghai \
+            -w /app \
             wantcat/trendradar:latest
 
       - name: Deploy to GitHub Pages
