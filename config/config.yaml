@@ -5,6 +5,7 @@ timezone: "Asia/Shanghai"
 # 完全禁用所有中文/国内平台
 platforms: []
 
+# 启用 RSS（仅保留快速可靠的源）
 rss:
   enabled: true
   feeds:
@@ -14,17 +15,20 @@ rss:
       url: "https://feeds.reuters.com/reuters/technologyNews"
     - name: "SpaceNews"
       url: "https://spacenews.com/feed/"
-    - name: "CHIPS Act Updates"
-      url: "https://www.commerce.gov/rss/chips-and-science-act"
-    - name: "Nature Biotechnology"
-      url: "https://www.nature.com/nbt.rss"
 
+# 关闭定时调度（关键！避免进入循环）
+schedule:
+  enabled: false
+
+# 存储配置
 storage:
   backend: "local"
   local:
     data_dir: "/app/output"
 
+# 报告模式
 report:
   mode: "daily"
 
+# 频率词文件路径
 frequency_words_file: "/app/config/frequency_words.txt"
