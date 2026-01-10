@@ -12,7 +12,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20  # ✅ 延长至 20 分钟
 
     steps:
       - name: Checkout code
