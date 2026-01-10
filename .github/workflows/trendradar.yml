@@ -21,18 +21,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Run TrendRadar via Docker
-        uses: docker/run-action@v3
-        with:
-          image: wantcat/trendradar:latest
-          args: >
-            --config /app/config/config.yaml
-            --output /app/output
-          env: |
-            TZ=Asia/Shanghai
-          volumes: |
-            ${{ github.workspace }}/config:/app/config:ro
-            ${{ github.workspace }}/output:/app/output
-          pull: true
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config:ro \
+            -v ${{ github.workspace }}/output:/app/output \
+            -e TZ=Asia/Shanghai \
+            wantcat/trendradar:latest
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
