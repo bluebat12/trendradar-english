@@ -48,4 +48,54 @@ jobs:
             TITLE="TrendRadar 英文热点更新"
             DESC="$(date '+%Y-%m-%d %H:%M') 北京时间"
             curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
+          finame: TrendRadar - English Only (Docker)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # UTC 00:00 = 北京时间 08:00
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create output directory
+        run: mkdir -p output
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run TrendRadar via Docker
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config:ro \
+            -v ${{ github.workspace }}/output:/app/output \
+            -e TZ=Asia/Shanghai \
+            -w /app \
+            wantcat/trendradar:latest
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          destination_dir: ./reports
+          keep_files: true
+
+      - name: Send WeChat via ServerChan
+        if: success() && env.SCKEY != ''
+        env:
+          SCKEY: ${{ secrets.SCKEY }}
+        run: |
+          REPORT=$(ls output/report_*.html | head -n1)
+          if [ -f "$REPORT" ]; then
+            TITLE="TrendRadar 英文热点更新"
+            DESC="$(date '+%Y-%m-%d %H:%M') 北京时间"
+            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
           fi
