@@ -17,12 +17,18 @@ jobs:
       - name: Create output directory
         run: mkdir -p output
 
+      - name: Install Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+
       - name: Run TrendRadar via Docker
         run: |
-          docker run --rm \
+          sudo docker run --rm \
             -v $PWD/config:/app/config:ro \
             -v $PWD/output:/app/output \
             -e TZ=Asia/Shanghai \
+            -w /app \
             wantcat/trendradar:latest
 
       - name: Deploy to GitHub Pages
