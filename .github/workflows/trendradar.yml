@@ -25,17 +25,15 @@ jobs:
             cp frequency_words.txt config/
             echo "Copied frequency_words.txt to config/"
           else
-            echo "Warning: frequency_words.txt not found in repository root."
+            echo "Warning: frequency_words.txt not found."
           fi
 
       - name: Install and Start Docker
         run: |
-          # Use official Docker installation script to avoid containerd conflict on Ubuntu 24.04
           curl -fsSL https://get.docker.com -o get-docker.sh
           sudo sh get-docker.sh
           sudo systemctl start docker
           sudo usermod -aG docker $USER
-          # Reload group membership (workaround for non-login shell)
           newgrp docker
           docker --version
 
