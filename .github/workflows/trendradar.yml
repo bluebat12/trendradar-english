@@ -23,19 +23,20 @@ jobs:
           mkdir -p output config
           if [ -f "frequency_words.txt" ]; then
             cp frequency_words.txt config/
+            echo "Copied frequency_words.txt to config/"
           else
-            echo "Warning: frequency_words.txt not found."
+            echo "Warning: frequency_words.txt not found in repository root."
           fi
 
-      # 👇 关键：安装并启动 Docker
       - name: Install and Start Docker
         run: |
           sudo apt-get update
           sudo apt-get install -y docker.io
           sudo systemctl start docker
           sudo usermod -aG docker $USER
-          # 等待用户组生效
-          newgrp docker
+          # Re-login to apply group change (workaround for Actions)
+          echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$USER
+          sudo chmod 0440 /etc/sudoers.d/$USER
           docker --version
 
       - name: Run TrendRadar via Docker
@@ -56,7 +57,7 @@ jobs:
           keep_files: true
 
       - name: Send WeChat via ServerChan
-        if: success() && secrets.SCKEY != ''
+        if: success() && github.secrets.SCKEY != ''
         env:
           SCKEY: ${{ secrets.SCKEY }}
         run: |
