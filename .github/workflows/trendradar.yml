@@ -2,8 +2,8 @@ name: TrendRadar - English Only (Docker)
 
 on:
   schedule:
-    - cron: "0 0 * * *"  # 北京时间 08:00
-  workflow_dispatch:     # 允许手动触发
+    - cron: "0 0 * * *"  # UTC 00:00 = 北京时间 08:00
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,12 +20,20 @@ jobs:
 
       - name: Prepare Directories
         run: |
-          # 创建必要目录并确保权限
           mkdir -p output config
-          # 如果词频文件在根目录，复制到 config 文件夹供 Docker 挂载
           if [ -f "frequency_words.txt" ]; then 
             cp frequency_words.txt config/
           fi
+
+      # 👇 关键新增步骤：安装并启动 Docker
+      - name: Install and Start Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+          sudo systemctl start docker
+          sudo usermod -aG docker $USER
+          # 验证
+          docker --version
 
       - name: Run TrendRadar via Docker
         run: |
@@ -50,7 +58,6 @@ jobs:
         env:
           SCKEY: ${{ secrets.SCKEY }}
         run: |
-          # 递归搜索生成的 HTML 报告路径
           REPORT_PATH=$(find output -name "report_*.html" | head -n 1)
           if [ -n "$REPORT_PATH" ]; then
             TITLE="TrendRadar_English_Update"
