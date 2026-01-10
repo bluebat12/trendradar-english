@@ -27,9 +27,11 @@ rss:
 storage:
   backend: "local"
   local:
-    data_dir: "output"
+    # 修改为容器内的绝对路径
+    data_dir: "/app/output"
 
 report:
   mode: "daily"
 
-frequency_words_file: "frequency_words.txt"
+# 必须指向容器挂载后的绝对路径
+frequency_words_file: "/app/config/frequency_words.txt"
