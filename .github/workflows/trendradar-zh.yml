@@ -1,0 +1,9 @@
+# trendradar-zh.yml
+name: TrendRadar - Chinese Only
+
+on:
+  schedule:
+    - cron: "0 1 * * *"  # 北京时间 09:00
+  workflow_dispatch:
+
+# ... 配置 platforms 启用微博、知乎等，rss 可选
