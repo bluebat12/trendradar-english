@@ -6,7 +6,78 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: writename: TrendRadar - English Only (Docker)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # UTC 00:00 = 北京时间 08:00
+  workflow_dispatch:
+
+permissions:
   contents: write
+  pages: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # 降低到 10 分钟（足够完成）
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare Directories
+        run: |
+          mkdir -p output config
+          if [ -f "frequency_words.txt" ]; then
+            cp frequency_words.txt config/
+            echo "Copied frequency_words.txt to config/"
+          else
+            echo "Warning: frequency_words.txt not found. Creating empty file."
+            touch frequency_words.txt
+            cp frequency_words.txt config/
+          fi
+
+      - name: Install and Start Docker
+        run: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          sudo systemctl start docker
+          sudo usermod -aG docker $USER
+          newgrp docker
+          docker --version
+
+      - name: Run TrendRadar via Docker (One-time Mode)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config:ro \
+            -v ${{ github.workspace }}/output:/app/output \
+            -e TZ=Asia/Shanghai \
+            wantcat/trendradar:latest \
+            --once
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          destination_dir: ./reports
+          keep_files: true
+
+      - name: Send WeChat via ServerChan
+        if: success() && github.secrets.SCKEY != ''
+        env:
+          SCKEY: ${{ secrets.SCKEY }}
+        run: |
+          REPORT_PATH=$(find output -name "report_*.html" | head -n 1)
+          if [ -n "$REPORT_PATH" ]; then
+            TITLE="TrendRadar_English_Update"
+            DESC="New_report_generated_successfully"
+            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
+          else
+            echo "No report file found to notify."
+          fi
   pages: write
 
 jobs:
