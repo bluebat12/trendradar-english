@@ -1,0 +1,35 @@
+timezone: "Asia/Shanghai"
+
+platforms:
+  - id: "weibo_hot_search"
+    enabled: false
+  - id: "toutiao_hot"
+    enabled: false
+  - id: "zhihu_hot"
+    enabled: false
+  - id: "baidu_hot"
+    enabled: false
+
+rss:
+  enabled: true
+  feeds:
+    - name: "FDA Press Announcements"
+      url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"
+    - name: "Reuters Technology"
+      url: "https://feeds.reuters.com/reuters/technologyNews"
+    - name: "SpaceNews"
+      url: "https://spacenews.com/feed/"
+    - name: "CHIPS Act Updates"
+      url: "https://www.commerce.gov/rss/chips-and-science-act"
+    - name: "Nature Biotechnology"
+      url: "https://www.nature.com/nbt.rss"
+
+storage:
+  backend: "local"
+  local:
+    data_dir: "output"
+
+report:
+  mode: "daily"
+
+frequency_words_file: "frequency_words.txt"
