@@ -25,9 +25,9 @@ jobs:
         run: pip install google-genai
           
       - name: Install dependencies
-      run:
-        python -m pip install --upgrade pip
-        pip install google-genai requests feedparser
+        run:
+          python -m pip install --upgrade pip
+          pip install google-genai requests feedparser
         
           # 必须在这里显式映射，Python 才能通过 os.getenv 拿到值
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
