@@ -1,75 +1,29 @@
-name: TrendRadar - English Only (Docker)
+name: Global English Intelligence Scout
 
 on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
+  schedule:
+    - cron: '30 0 * * *'  # UTC 00:30 = 北京时间 08:30 运行
+  workflow_dispatch:      # 允许手动点击运行
 
 jobs:
-  run:
+  run-scout:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # ✅ 延长到 15 分钟
-
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v4
-
-      - name: Prepare Directories
-        run: |
-          mkdir -p output config
-          if [ -f "frequency_words.txt" ]; then
-            cp frequency_words.txt config/
-            echo "Copied frequency_words.txt to config/"
-          else
-            echo "Warning: frequency_words.txt not found. Creating empty file."
-            touch frequency_words.txt
-            cp frequency_words.txt config/
-          fi
-
-      - name: Check config files
-        run: |
-          ls -la config/
-          cat config/config.yaml
-
-      - name: Install and Start Docker
-        run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
-          sudo systemctl start docker
-          sudo usermod -aG docker $USER
-          newgrp docker
-          docker --version
-
-      - name: Run TrendRadar via Docker (One-time Mode)
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/config:/app/config:ro \
-            -v ${{ github.workspace }}/output:/app/output \
-            -e TZ=Asia/Shanghai \
-            wantcat/trendradar:latest \
-            --once
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        if: success()
+      
+      - name: 设置 Python
+        uses: actions/setup-python@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./output
-          destination_dir: ./reports
-          keep_files: true
-
-      - name: Send WeChat via ServerChan
-        if: success() && github.secrets.SCKEY != ''
+          python-version: '3.11'
+          
+      - name: 安装依赖
+        run: pip install requests feedparser google-generativeai
+          
+      - name: 执行 AI 情报归纳
         env:
-          SCKEY: ${{ secrets.SCKEY }}
-        run: |
-          REPORT_PATH=$(find output -name "report_*.html" | head -n 1)
-          if [ -n "$REPORT_PATH" ]; then
-            TITLE="TrendRadar_English_Update"
-            DESC="New_report_generated_successfully"
-            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=${TITLE}&desp=${DESC}"
-          else
-            echo "No report file found to notify."
-          fi
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+        run: python main.py
