@@ -17,7 +17,9 @@ BARK_SERVER = os.getenv('BARK_SERVER', 'https://api.day.app').rstrip('/')
 # --- 英文情報源配置 ---
 # 您可以隨時在此處增加 Google Alerts 的 RSS 連結
 RSS_FEEDS = [
-    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/06815340636254070634/17226507421115822368"},
+    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
+    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
     {"name": "FDA Press", "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
     {"name": "Reuters Tech", "url": "https://feeds.reuters.com/reuters/technologyNews"}
 ]
