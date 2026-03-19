@@ -24,10 +24,13 @@ jobs:
       - name: 安装依赖
         run: pip install requests feedparser google-generativeai
           
-      - name: 执行 AI 情报归纳
+      - name: Run python main.py
         env:
+          # 必须在这里显式映射，Python 才能通过 os.getenv 拿到值
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
+          # 如果你有自定义 Bark 服务器，也加上
+          BARK_SERVER: ${{ secrets.BARK_SERVER }} 
         run: python main.py
