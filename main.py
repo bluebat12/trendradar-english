@@ -17,11 +17,12 @@ BARK_SERVER = os.getenv('BARK_SERVER', 'https://api.day.app').rstrip('/')
 # --- 英文情報源配置 ---
 # 您可以隨時在此處增加 Google Alerts 的 RSS 連結
 RSS_FEEDS = [
-    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
-    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
-    {"name": "Intel 18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
+    {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+    {"name": "Intel_Tech_18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
+    {"name": "Intel_Subsidy", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
+    {"name": "CNBC Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"},
     {"name": "FDA Press", "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
-    {"name": "Reuters Tech", "url": "https://feeds.reuters.com/reuters/technologyNews"}
+    {"name": "Reuters Tech", "url": "https://www.reutersagency.com/feed/?best-topics=technology&post_type=best"},
 ]
 
 # --- 初始化 AI ---
@@ -99,7 +100,7 @@ def main():
             if ai_res:
                 write_to_notion(ai_res, entry.link)
                 # 如果是 4 分以上的高價值情報，加入推送列表
-                if ai_res['score'] >= 1:
+                if ai_res['score'] >= 3:
                     high_value_news.append(f"🔥 {ai_res['score']}分: {ai_res['cn_title']}")
             
             # 🔴 關鍵：免費版 Gemini API 每分鐘限制 15 次，這裡每條休息 5 秒
