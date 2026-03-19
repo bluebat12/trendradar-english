@@ -99,7 +99,7 @@ def main():
             if ai_res:
                 write_to_notion(ai_res, entry.link)
                 # 如果是 4 分以上的高價值情報，加入推送列表
-                if ai_res['score'] >= 4:
+                if ai_res['score'] >= 1:
                     high_value_news.append(f"🔥 {ai_res['score']}分: {ai_res['cn_title']}")
             
             # 🔴 關鍵：免費版 Gemini API 每分鐘限制 15 次，這裡每條休息 5 秒
