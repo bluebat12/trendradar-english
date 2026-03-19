@@ -1,90 +1,79 @@
 import os
-import feedparser
 import requests
+import feedparser
 from google import genai
 from google.genai import types
 
-# --- 1. 配置区域 (从环境变量获取) ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-BARK_KEY = os.environ.get("BARK_KEY")
-BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app")
+# --- 1. 环境参数配置 ---
+# 确保你在 GitHub Secrets 中设置了这些变量
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+DATABASE_ID = os.getenv("DATABASE_ID")
+BARK_KEY = os.getenv("BARK_KEY")
+BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip('/')
 
-# RSS 源配置 (保持你之前的配置)
-RSS_FEEDS = {
+# --- 2. 英文情报源配置 ---
+# 修复了格式问题，使用简单的字典结构
+RSS_FEEDS = [
     {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
     {"name": "Intel_Tech_18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
     {"name": "Intel_Subsidy", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
     {"name": "CNBC Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"},
     {"name": "FDA Press", "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
-}
+]
 
-def get_rss_content():
-    """获取所有订阅源的内容"""
-    print("🚀 启动扫描...")
-    all_articles = []
-    for name, url in RSS_FEEDS.items():
-        feed = feedparser.parse(url)
-        print(f"📡 正在检查: {name} | 找到 {len(feed.entries)} 條文章")
-        for entry in feed.entries:
-            all_articles.append(f"Source: {name}\nTitle: {entry.title}\nLink: {entry.link}\nSummary: {entry.get('summary', '')}\n")
-    return "\n---\n".join(all_articles)
-
-def summarize_with_gemini(content):
-    """使用新版 google-genai SDK 进行总结"""
-    if not GEMINI_API_KEY:
-        print("❌ 错误: 未检测到 GEMINI_API_KEY")
+def analyze_with_gemini(text):
+    """使用新版 google-genai SDK 分析新闻"""
+    if not GEMINI_KEY:
+        print("❌ 错误: 找不到 GEMINI_API_KEY")
         return None
-
+    
     try:
-        # 初始化新版客户端
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        prompt = f"Please summarize the following tech news in Chinese, highlighting key trends and financial impacts:\n\n{content}"
-        
-        # 新版调用方式
+        client = genai.Client(api_key=GEMINI_KEY)
         response = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt,
+            contents=f"请用中文总结以下科技动态，并分析对市场的潜在影响：\n\n{text}",
             config=types.GenerateContentConfig(
-                system_instruction="你是一位专业的科技与金融分析师，善于从琐碎新闻中提取核心趋势。",
-                temperature=0.7,
+                system_instruction="你是一位资深的行业分析师，擅长从 RSS 摘要中提取关键投资信息。",
+                temperature=0.7
             )
         )
         return response.text
     except Exception as e:
-        print(f"❌ Gemini 总结失败: {e}")
+        print(f"❌ AI 分析失败: {e}")
         return None
 
-def push_to_bark(text):
-    """通过 Bark 推送通知"""
-    if not BARK_KEY:
-        print("ℹ️ 未配置 BARK_KEY，跳过推送")
-        return
-
-    url = f"{BARK_SERVER}/{BARK_KEY}/TrendRadar Daily Briefing/{text}"
-    try:
-        requests.get(url)
-        print("📲 Bark 推送成功")
-    except Exception as e:
-        print(f"❌ Bark 推送失败: {e}")
-
 def main():
-    # 1. 获取 RSS 内容
-    raw_content = get_rss_content()
-    if not raw_content:
-        print("📭 没有找到新内容，退出。")
+    print("🚀 开始扫描情报源...")
+    collected_news = []
+    
+    for feed_info in RSS_FEEDS:
+        print(f"📡 正在拉取: {feed_info['name']}")
+        feed = feedparser.parse(feed_info['url'])
+        
+        # 只取每个源最新的 3 条，避免内容过长
+        for entry in feed.entries[:3]:
+            news_item = f"【{feed_info['name']}】{entry.title}\n摘要: {entry.get('summary', '')[:200]}"
+            collected_news.append(news_item)
+    
+    if not collected_news:
+        print("📭 今日无新动态")
         return
 
-    # 2. 调用新版 Gemini 总结
-    summary = summarize_with_gemini(raw_content)
+    full_text = "\n\n".join(collected_news)
+    
+    # AI 总结
+    summary = analyze_with_gemini(full_text)
     
     if summary:
-        print("\n📝 总结内容:\n", summary)
-        # 3. 推送结果
-        push_to_bark(summary)
-        # 如果需要写入 Notion，可以在此调用你之前的 Notion 函数
+        print("📝 总结完成:\n", summary)
+        # 推送 Bark
+        if BARK_KEY:
+            push_url = f"{BARK_SERVER}/{BARK_KEY}/情报雷达总结/{summary}"
+            requests.get(push_url)
+            print("📲 已推送到手机")
     else:
-        print("⚠️ 未能生成总结")
+        print("⚠️ 未能生成 AI 总结")
 
 if __name__ == "__main__":
     main()
