@@ -2,8 +2,12 @@ name: Global English Intelligence Scout
 
 on:
   schedule:
-    - cron: '30 0 * * *'  # UTC 00:30 = 北京时间 08:30 运行
-  workflow_dispatch:      # 允许手动点击运行
+    - cron: '30 0 * * *'  # 北京时间 08:30 运行 (UTC 00:30)
+  workflow_dispatch:
+
+env:
+  # 消除 Node.js 20 弃用警告，提前启用 Node.js 24
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   run-scout:
