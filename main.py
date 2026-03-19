@@ -49,10 +49,12 @@ def analyze_with_gemini(text: str) -> str | None:
             f"/models/{model}:generateContent?key={GEMINI_KEY}"
         )
         payload = {
-            "system_instruction": {
-                "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。"}]
-            },
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。\n\n" + prompt}]
+                }
+            ],
             "generationConfig": {"temperature": 0.7},
         }
         try:
