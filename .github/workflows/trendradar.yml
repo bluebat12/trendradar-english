@@ -4,37 +4,31 @@ on:
   schedule:
     # 每天北京时间上午 9:00 运行 (UTC 1:00)
     - cron: '0 1 * * *'
-  workflow_dispatch: # 允许你在 GitHub 页面手动点击运行
+  workflow_dispatch: # 允许在 GitHub 页面手动点击运行
 
 jobs:
   run-scout:
     runs-on: ubuntu-latest
-    
+
     env:
-      # 消除 GitHub Actions 的 Node.js 20 弃用警告
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      # 1. 检出代码库
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 安装 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3. 安装脚本运行所需的全部依赖库
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai requests feedparser
+          pip install requests feedparser
 
-      # 4. 执行主脚本并传入 GitHub Secrets
       - name: Run TrendRadar Scanner
         env:
-          # 这里的名字必须与 GitHub Settings -> Secrets 中的名字完全一致
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
