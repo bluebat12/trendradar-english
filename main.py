@@ -34,7 +34,7 @@ def analyze_with_gemini(text: str) -> str | None:
     try:
         client = genai.Client(api_key=GEMINI_KEY)
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=(
                 "请用中文总结以下科技动态，并分析对市场的潜在影响。"
                 "格式：先给出3句话的整体概述，再逐条列出每条要点（不超过5条）。\n\n"
