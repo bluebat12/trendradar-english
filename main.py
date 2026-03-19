@@ -1,10 +1,7 @@
 import os
-import json
 import requests
 import feedparser
 from datetime import datetime, timezone, timedelta
-from google import genai
-from google.genai import types
 
 # --- 1. 环境参数配置 ---
 GEMINI_KEY    = os.getenv("GEMINI_API_KEY")
@@ -27,28 +24,56 @@ RSS_FEEDS = [
 # --------------------------------------------------------------------------- #
 
 def analyze_with_gemini(text: str) -> str | None:
-    """调用 Gemini 生成中文摘要，失败时返回 None"""
+    """调用 Gemini REST API 生成中文摘要，兼容所有 Key 类型"""
     if not GEMINI_KEY:
         print("❌ 错误: 找不到 GEMINI_API_KEY，请在 GitHub Secrets 中配置")
         return None
-    try:
-        client = genai.Client(api_key=GEMINI_KEY)
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=(
-                "请用中文总结以下科技动态，并分析对市场的潜在影响。"
-                "格式：先给出3句话的整体概述，再逐条列出每条要点（不超过5条）。\n\n"
-                f"{text}"
-            ),
-            config=types.GenerateContentConfig(
-                system_instruction="你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。",
-                temperature=0.7,
-            ),
+
+    # 依次尝试可用的模型（新 key 优先用 v1，旧 key 用 v1beta）
+    model_attempts = [
+        ("v1",     "gemini-2.0-flash"),
+        ("v1beta", "gemini-2.0-flash"),
+        ("v1beta", "gemini-1.5-flash"),
+        ("v1",     "gemini-1.5-flash"),
+    ]
+
+    prompt = (
+        "请用中文总结以下科技动态，并分析对市场的潜在影响。"
+        "格式：先给出3句话的整体概述，再逐条列出每条要点（不超过5条）。\n\n"
+        f"{text}"
+    )
+
+    for api_ver, model in model_attempts:
+        url = (
+            f"https://generativelanguage.googleapis.com/{api_ver}"
+            f"/models/{model}:generateContent?key={GEMINI_KEY}"
         )
-        return response.text
-    except Exception as e:
-        print(f"❌ AI 分析失败: {e}")
-        return None
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。"}]
+            },
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.7},
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                result = data["candidates"][0]["content"]["parts"][0]["text"]
+                print(f"✅ 使用模型: {api_ver}/{model}")
+                return result
+            elif resp.status_code in (404, 429):
+                print(f"⚠️  {api_ver}/{model} 不可用 ({resp.status_code})，尝试下一个...")
+                continue
+            else:
+                print(f"❌ AI 分析失败 [{resp.status_code}]: {resp.text[:200]}")
+                return None
+        except Exception as e:
+            print(f"❌ 请求异常 ({model}): {e}")
+            continue
+
+    print("❌ 所有模型均不可用，请检查 GEMINI_API_KEY 是否有效")
+    return None
 
 
 def push_bark(title: str, body: str) -> bool:
