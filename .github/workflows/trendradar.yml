@@ -1,41 +1,40 @@
-name: TrendRadar Daily Scan
+name: Global English Intelligence Scout
 
 on:
   schedule:
     # 每天北京时间上午 9:00 运行 (UTC 1:00)
     - cron: '0 1 * * *'
-  workflow_dispatch: # 允许你手动点击 "Run workflow" 测试
+  workflow_dispatch: # 允许你在 GitHub 页面手动点击运行
 
 jobs:
   run-scout:
     runs-on: ubuntu-latest
     
     env:
-      # 强制使用 Node 24 以消除 GitHub 的弃用警告
+      # 消除 GitHub Actions 的 Node.js 20 弃用警告
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      # 1. 检出代码
+      # 1. 检出代码库
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 设置 Python 环境 (使用你日志中成功的 3.11 版本)
+      # 2. 安装 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3. 安装所有必需的依赖 (核心修复点)
+      # 3. 安装脚本运行所需的全部依赖库
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install google-genai requests feedparser
 
-      # 4. 运行主程序并映射 Secrets (核心修复点)
+      # 4. 执行主脚本并传入 GitHub Secrets
       - name: Run TrendRadar Scanner
         env:
-          # 这里的变量名必须与你 python 代码中 os.environ.get() 的名字一致
-          # 同时确保你在 GitHub Settings -> Secrets 中填好了这些 Key
+          # 这里的名字必须与 GitHub Settings -> Secrets 中的名字完全一致
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
