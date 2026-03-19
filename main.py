@@ -11,9 +11,11 @@ BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app")
 
 # RSS 源配置 (保持你之前的配置)
 RSS_FEEDS = {
-    "Intel_Finance": "https://www.google.com/alerts/feeds/12345/67890", # 示例，请替换
-    "Intel_Tech_18A": "https://www.google.com/alerts/feeds/.../...",
-    "CNBC_Tech": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910",
+    {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+    {"name": "Intel_Tech_18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
+    {"name": "Intel_Subsidy", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
+    {"name": "CNBC Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"},
+    {"name": "FDA Press", "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
 }
 
 def get_rss_content():
