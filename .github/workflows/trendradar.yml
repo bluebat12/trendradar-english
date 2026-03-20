@@ -2,12 +2,17 @@ name: Global English Intelligence Scout
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天北京时间上午 9:00 (UTC 1:00)
-  workflow_dispatch:
+    # 每 30 分钟运行一次 (例如 10:00, 10:30...)，实现准实时监控
+    - cron: '*/30 * * * *' 
+  workflow_dispatch: # 保持手动触发按钮
 
 jobs:
   run-scout:
     runs-on: ubuntu-latest
+    
+    # 重要：赋予 Actions 写入权限，否则无法保存“记忆”文件
+    permissions:
+      contents: write
 
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -15,6 +20,9 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          # 取消浅克隆，确保 git 提交正常
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,15 +32,30 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests feedparser
+          # 注意：如果你使用了新版 SDK，请加上 google-genai
+          pip install requests feedparser google-genai 
 
       - name: Run TrendRadar Scanner
         env:
+          # 保持你现有的多 Key 配置
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
-          BARK_KEY:         ${{ secrets.BARK_KEY }}
-          BARK_SERVER:      ${{ secrets.BARK_SERVER }}
-          NOTION_TOKEN:     ${{ secrets.NOTION_TOKEN }}
-          DATABASE_ID:      ${{ secrets.DATABASE_ID }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          BARK_SERVER: ${{ secrets.BARK_SERVER }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID: ${{ secrets.DATABASE_ID }}
         run: python main.py
+
+      # --- 核心优化步骤：持久化记忆 ---
+      - name: Commit and Push if memory updated
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          # 如果 main.py 生成或更新了 sent_news.txt，则提交
+          if [ -f sent_news.txt ]; then
+            git add sent_news.txt
+            # [skip ci] 很重要，防止提交代码触发无限循环运行
+            git commit -m "chore: update news memory [skip ci]" || echo "No changes to commit"
+            git push
+          fi
