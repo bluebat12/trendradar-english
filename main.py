@@ -31,7 +31,7 @@ RSS_FEEDS = [
 ]
 
 # --------------------------------------------------------------------------- #
-#  诊断启动：打印所有配置状态
+#  诊断启动
 # --------------------------------------------------------------------------- #
 def print_config_check():
     print("=" * 50)
@@ -46,9 +46,15 @@ def print_config_check():
     print("=" * 50)
 
 # --------------------------------------------------------------------------- #
-#  Gemini
+#  Gemini — 修复版：429和404都继续尝试，只要有一个模型成功即可
 # --------------------------------------------------------------------------- #
 def _call_gemini(api_key, prompt):
+    """
+    用单个 Key 尝试所有模型。
+    - 成功: 返回文本
+    - 该 Key 所有模型均 429: 返回 '__QUOTA_EXCEEDED__' → 调用方切换下一个 Key
+    - 遇到真正错误(非429/404): 返回 '__ERROR__' → 调用方终止
+    """
     model_attempts = [
         ("v1",     "gemini-2.0-flash"),
         ("v1beta", "gemini-2.0-flash"),
@@ -59,55 +65,76 @@ def _call_gemini(api_key, prompt):
         "contents": [{"role": "user", "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。\n\n" + prompt}]}],
         "generationConfig": {"temperature": 0.7},
     }
-    all_quota = True
+
+    got_429 = False   # 是否遇到过 429
+    got_success = False
+
     for api_ver, model in model_attempts:
         url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
         try:
             resp = requests.post(url, json=payload, timeout=30)
-            print(f"    [{api_ver}/{model}] HTTP {resp.status_code}")
-            if resp.status_code == 200:
+            code = resp.status_code
+            print(f"    [{api_ver}/{model}] HTTP {code}")
+
+            if code == 200:
                 data = resp.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif resp.status_code == 429:
-                all_quota = True
+
+            elif code == 429:
+                # 配额耗尽，记录并继续尝试其他模型
+                got_429 = True
                 continue
-            elif resp.status_code == 404:
-                all_quota = False
+
+            elif code == 404:
+                # 该模型不支持，继续尝试其他模型（不影响切Key判断）
                 continue
+
             else:
-                # 打印完整错误帮助诊断
-                print(f"    ❌ 完整错误: {resp.text[:300]}")
-                all_quota = False
-                return None
+                # 真正的错误（401无效Key、500服务器错误等）
+                print(f"    ❌ 完整错误: {resp.text[:200]}")
+                return "__ERROR__"
+
         except Exception as e:
             print(f"    ❌ 请求异常: {e}")
-            all_quota = False
-    return "__QUOTA_EXCEEDED__" if all_quota else None
+            return "__ERROR__"
+
+    # 所有模型都试完了，没有成功
+    # 只要遇到过429就认为是配额问题，切换下一个Key
+    if got_429:
+        return "__QUOTA_EXCEEDED__"
+    else:
+        # 全部都是404，说明这个Key可能有问题，也尝试切换
+        return "__QUOTA_EXCEEDED__"
 
 
 def analyze_with_gemini(text):
     if not GEMINI_KEYS:
         print("❌ 未找到任何 Gemini Key")
         return None
+
+    print(f"🔑 共加载 {len(GEMINI_KEYS)} 个 Gemini Key")
     prompt = (
         "请用中文总结以下科技动态，并分析对市场的潜在影响。"
         "格式：先给出3句话的整体概述，再逐条列出每条要点（不超过5条）。\n\n"
         f"{text}"
     )
+
     for idx, key in enumerate(GEMINI_KEYS, start=1):
         key_label = f"Key-{idx}(...{key[-6:]})"
         print(f"  🔄 尝试 {key_label}")
         result = _call_gemini(key, prompt)
+
         if result == "__QUOTA_EXCEEDED__":
-            print(f"  ⚠️  {key_label} 配额耗尽，切换下一个...")
+            print(f"  ⚠️  {key_label} 配额耗尽或不可用，切换下一个...")
             continue
-        elif result is not None:
-            print(f"  ✅ {key_label} 成功，摘要长度={len(result)} 字符")
-            return result
-        else:
-            print(f"  ❌ {key_label} 失败（非配额问题），终止")
+        elif result == "__ERROR__":
+            print(f"  ❌ {key_label} 遇到严重错误，终止")
             return None
-    print("❌ 所有 Key 配额耗尽")
+        elif result is not None:
+            print(f"  ✅ {key_label} 调用成功，摘要长度={len(result)}字符")
+            return result
+
+    print("❌ 所有 Gemini Key 均不可用，今日配额可能已耗尽")
     return None
 
 # --------------------------------------------------------------------------- #
@@ -119,11 +146,8 @@ def push_bark(title, body):
         return False
     print(f"\n📲 开始 Bark 推送...")
     print(f"  URL: {BARK_SERVER}/push")
-    print(f"  device_key 末6位: ...{BARK_KEY[-6:]}")
-    print(f"  title: {title}")
     print(f"  body 长度: {len(body)} 字符")
     try:
-        url = f"{BARK_SERVER}/push"
         payload = {
             "device_key": BARK_KEY,
             "title": title,
@@ -131,14 +155,13 @@ def push_bark(title, body):
             "sound": "minuet",
             "group": "情报雷达",
         }
-        resp = requests.post(url, json=payload, timeout=15)
-        print(f"  HTTP 状态: {resp.status_code}")
-        print(f"  响应内容: {resp.text[:300]}")
+        resp = requests.post(f"{BARK_SERVER}/push", json=payload, timeout=15)
+        print(f"  HTTP {resp.status_code}: {resp.text[:200]}")
         if resp.status_code == 200 and resp.json().get("code") == 200:
             print("  ✅ Bark 推送成功")
             return True
         else:
-            print("  ❌ Bark 推送失败（见上方响应内容）")
+            print("  ❌ Bark 推送失败")
             return False
     except Exception as e:
         print(f"  ❌ Bark 推送异常: {e}")
@@ -152,7 +175,6 @@ def push_notion(title, summary, raw_news):
         print("⚠️  NOTION_TOKEN 或 DATABASE_ID 未配置，跳过")
         return False
     print(f"\n📓 开始 Notion 写入...")
-    print(f"  DATABASE_ID 末8位: ...{DATABASE_ID[-8:]}")
     tz_cst = timezone(timedelta(hours=8))
     today_str = datetime.now(tz_cst).strftime("%Y-%m-%d")
     headers = {
@@ -177,13 +199,12 @@ def push_notion(title, summary, raw_news):
             json=page_data,
             timeout=20,
         )
-        print(f"  HTTP 状态: {resp.status_code}")
-        print(f"  响应内容: {resp.text[:500]}")
+        print(f"  HTTP {resp.status_code}: {resp.text[:300]}")
         if resp.status_code == 200:
-            print(f"  ✅ Notion 写入成功")
+            print("  ✅ Notion 写入成功")
             return True
         else:
-            print("  ❌ Notion 写入失败（见上方响应内容）")
+            print("  ❌ Notion 写入失败")
             return False
     except Exception as e:
         print(f"  ❌ Notion 写入异常: {e}")
@@ -204,11 +225,10 @@ def main():
             count = len(feed.entries[:3])
             print(f"   获取到 {count} 条")
             for entry in feed.entries[:3]:
-                news_item = (
+                collected_news.append(
                     f"【{feed_info['name']}】{entry.title}\n"
                     f"摘要: {entry.get('summary', '')[:200]}"
                 )
-                collected_news.append(news_item)
         except Exception as e:
             print(f"⚠️  拉取 {feed_info['name']} 失败: {e}")
 
@@ -217,8 +237,7 @@ def main():
         return
 
     print(f"\n📰 共收集到 {len(collected_news)} 条新闻，正在生成 AI 总结...")
-    full_text = "\n\n".join(collected_news)
-    summary = analyze_with_gemini(full_text)
+    summary = analyze_with_gemini("\n\n".join(collected_news))
 
     if not summary:
         print("⚠️  未能生成 AI 总结，流程终止")
@@ -227,12 +246,10 @@ def main():
     print("\n📝 AI 总结 (前200字):\n", summary[:200], "...")
 
     tz_cst = timezone(timedelta(hours=8))
-    today_label = datetime.now(tz_cst).strftime("%Y-%m-%d")
-    push_title = f"情报雷达 · {today_label}"
+    push_title = f"情报雷达 · {datetime.now(tz_cst).strftime('%Y-%m-%d')}"
 
     push_bark(push_title, summary)
     push_notion(push_title, summary, collected_news)
-
     print("\n✅ 全部完成")
 
 if __name__ == "__main__":
