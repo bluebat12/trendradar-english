@@ -2,6 +2,7 @@ import os
 import requests
 import feedparser
 from datetime import datetime, timezone, timedelta
+import urllib.parse
 
 # --- 1. 环境参数配置 ---
 def _load_gemini_keys():
@@ -140,6 +141,42 @@ def analyze_with_gemini(text):
     return None
 
 # --------------------------------------------------------------------------- #
+#  免费翻译功能（使用 Google Translate，无需 API Key）
+# --------------------------------------------------------------------------- #
+def translate_to_chinese(text):
+    """
+    使用 Google Translate 免费接口将英文翻译为中文
+    返回翻译后的文本，失败时返回原文
+    """
+    if not text:
+        return text
+
+    print("🌐 正在翻译为中文...")
+    try:
+        # Google Translate API
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "zh-CN",
+            "dt": "t",
+            "q": text[:5000]  # 限制长度
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            # 解析翻译结果
+            translated = "".join([item[0] for item in data[0] if item[0]])
+            print(f"  ✅ 翻译成功 ({len(text)} → {len(translated)} 字符)")
+            return translated
+        else:
+            print(f"  ⚠️ 翻译失败 HTTP {resp.status_code}")
+            return text
+    except Exception as e:
+        print(f"  ⚠️ 翻译异常: {e}")
+        return text  # 翻译失败时返回原文
+
+# --------------------------------------------------------------------------- #
 #  Bark
 # --------------------------------------------------------------------------- #
 def push_bark(title, body):
@@ -177,6 +214,7 @@ def push_notion(title, summary, raw_news):
         print("⚠️  NOTION_TOKEN 或 DATABASE_ID 未配置，跳过")
         return False
     print(f"\n📓 开始 Notion 写入...")
+    print(f"  DATABASE_ID: {DATABASE_ID[:8]}...")
     tz_cst = timezone(timedelta(hours=8))
     today_str = datetime.now(tz_cst).strftime("%Y-%m-%d")
     headers = {
@@ -201,13 +239,28 @@ def push_notion(title, summary, raw_news):
             json=page_data,
             timeout=20,
         )
-        print(f"  HTTP {resp.status_code}: {resp.text[:300]}")
+        print(f"  HTTP {resp.status_code}")
+        resp_json = resp.json()
+
+        # 打印详细错误信息
         if resp.status_code == 200:
             print("  ✅ Notion 写入成功")
+            print(f"    Page ID: {resp_json.get('id', 'N/A')}")
             return True
+        elif resp.status_code == 400:
+            print(f"  ❌ Notion 写入失败: 请求格式错误")
+            print(f"    错误详情: {resp_json.get('message', resp.text[:200])}")
+        elif resp.status_code == 401:
+            print(f"  ❌ Notion 写入失败: Token 无效")
+        elif resp.status_code == 403:
+            print(f"  ❌ Notion 写入失败: 无权限访问该数据库")
+            print(f"    请确认 DATABASE_ID 正确，且 Notion Integration 已添加到该数据库")
+        elif resp.status_code == 404:
+            print(f"  ❌ Notion 写入失败: 数据库不存在")
+            print(f"    请检查 DATABASE_ID 是否正确")
         else:
-            print("  ❌ Notion 写入失败")
-            return False
+            print(f"  ❌ Notion 写入失败: {resp_json.get('message', resp.text[:200])}")
+        return False
     except Exception as e:
         print(f"  ❌ Notion 写入异常: {e}")
         return False
@@ -262,14 +315,20 @@ def main():
                     + str(len(collected_news)) + " 条新闻，请访问情报雷达查看详情。")
 
         # 仍然尝试发送通知（使用错误提示）
-        push_bark(push_title + " ⚠️", summary)
+        summary_cn = translate_to_chinese(summary)  # 翻译
+        push_bark(push_title + " ⚠️", summary_cn)
         push_notion(push_title, summary, collected_news)
         print("\n✅ 通知已发送（无 AI 总结）")
         return
 
     print("\n📝 AI 总结 (前200字):\n", summary[:200], "...")
 
-    push_bark(push_title, summary)
+    # 翻译为中文后再发送通知
+    summary_cn = translate_to_chinese(summary)
+
+    # 先发 Bark（带翻译）
+    push_bark(push_title, summary_cn)
+    # 再写 Notion（保留英文原文供参考）
     push_notion(push_title, summary, collected_news)
     print("\n✅ 全部完成")
 
