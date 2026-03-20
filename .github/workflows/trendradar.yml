@@ -2,21 +2,20 @@ name: Global English Intelligence Scout
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # 每30分钟执行一次
+    - cron: '*/30 * * * *' 
   workflow_dispatch:
 
 jobs:
   run-scout:
     runs-on: ubuntu-latest
-
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    permissions:
+      contents: write # 必须开启写入权限
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true 
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,9 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests feedparser
+        run: pip install requests feedparser
 
       - name: Run TrendRadar Scanner
         env:
@@ -38,3 +35,14 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
         run: python main.py
+
+      # 【核心：将去重记录同步到仓库】
+      - name: Sync Seen News
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if [ -f seen_news.json ]; then
+            git add seen_news.json
+            git commit -m "chore: update seen news database [skip ci]" || echo "No changes to commit"
+            git push
+          fi
