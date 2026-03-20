@@ -1,9 +1,9 @@
-name: Global Intelligence Scout (Firebase Edition)
+name: TrendRadar Intelligence Scout
 
 on:
   schedule:
-    - cron: '*/30 * * * *' 
-  workflow_dispatch:
+    - cron: '*/30 * * * *' # 每30分鐘自動運行
+  workflow_dispatch: # 支持手動運行
 
 jobs:
   run-scout:
@@ -22,17 +22,17 @@ jobs:
         run: |
           pip install requests feedparser firebase-admin
 
-      - name: Run Scanner
+      - name: Run TrendRadar
         env:
-          # Firebase 配置 (從 GitHub Secrets 讀取)
+          # Firebase
           FIREBASE_CONFIG_JSON: ${{ secrets.FIREBASE_CONFIG_JSON }}
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           
-          # Gemini 配置
+          # Gemini (建議至少填寫兩個，增加容錯)
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           
-          # 推送配置
+          # Push
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
