@@ -1,194 +1,136 @@
 import os
 import requests
 import feedparser
-from datetime import datetime, timezone, timedelta
-import urllib.parse
 import json
 import hashlib
 import time
+import firebase_admin
+from firebase_admin import credentials, db
+from datetime import datetime, timezone, timedelta
 
-# --- 1. 环境参数配置 ---
-def _load_gemini_keys():
-    keys = []
-    for i in range(1, 6):
-        k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
-        if k:
-            keys.append(k)
-    single = os.getenv("GEMINI_API_KEY", "").strip()
-    if single and single not in keys:
-        keys.append(single)
-    return keys
-
-GEMINI_KEYS = _load_gemini_keys()
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("DATABASE_ID")
+# --- 1. 環境參數與 Firebase 初始化 ---
+GEMINI_KEYS = [os.getenv(f"GEMINI_API_KEY_{i}", "").strip() for i in range(1, 6) if os.getenv(f"GEMINI_API_KEY_{i}")]
 BARK_KEY = os.getenv("BARK_KEY")
 BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+DATABASE_ID = os.getenv("DATABASE_ID")
 
-# 去重文件路径
-SEEN_NEWS_FILE = "seen_news.json"
-MAX_SEEN_NEWS = 200  # 适当增加保留记录数量
+def init_firebase():
+    firebase_json = os.getenv("FIREBASE_CONFIG_JSON")
+    firebase_url = os.getenv("FIREBASE_URL")
+    if not firebase_json or not firebase_url:
+        print("⚠️ Firebase 配置缺失，無法執行去重")
+        return False
+    try:
+        cred_dict = json.loads(firebase_json)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred, {'databaseURL': firebase_url})
+        return True
+    except Exception as e:
+        print(f"❌ Firebase 初始化失敗: {e}")
+        return False
 
-# --- 2. RSS 情报源 ---
-RSS_FEEDS = [
-    {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
-    {"name": "Intel_Tech_18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
-    {"name": "Intel_Subsidy", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
-    {"name": "CNBC Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"},
-    {"name": "FDA Press", "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
-]
+# --- 2. 核心功能：去重、翻譯、評級 ---
 
-# --------------------------------------------------------------------------- #
-# 去重功能核心优化
-# --------------------------------------------------------------------------- #
-def load_seen_news():
-    """加载已推送的新闻哈希"""
-    if os.path.exists(SEEN_NEWS_FILE):
-        try:
-            with open(SEEN_NEWS_FILE, 'r', encoding='utf-8') as f:
-                return set(json.load(f))
-        except Exception as e:
-            print(f"⚠️ 加载去重文件失败: {e}")
-    return set()
+def is_duplicate(news_hash):
+    """檢查 Firebase 是否存過此哈希"""
+    try:
+        return db.reference(f'seen_news/{news_hash}').get() is not None
+    except: return False
 
-def save_seen_news(seen_set):
-    """保存已推送的新闻哈希"""
-    # 转换为列表并保留最新的记录
-    seen_list = list(seen_set)[-MAX_SEEN_NEWS:]
-    with open(SEEN_NEWS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(seen_list, f, ensure_ascii=False)
+def mark_as_sent(news_hash, title):
+    """記錄到 Firebase"""
+    try:
+        db.reference(f'seen_news/{news_hash}').set({
+            'title': title[:100],
+            'time': datetime.now(timezone(timedelta(hours=8))).isoformat()
+        })
+    except: pass
 
-def get_news_hash(title, source):
-    """生成标题+来源的哈希，避免不同来源同标题的冲突"""
-    content = f"{title}_{source}"
-    return hashlib.md5(content.encode('utf-8')).hexdigest()
-
-# --------------------------------------------------------------------------- #
-# 其他原有功能函数 (保持不变)
-# --------------------------------------------------------------------------- #
-def print_config_check():
-    print("=" * 50)
-    print("🔍 配置检查")
-    print(f" GEMINI Keys 数量: {len(GEMINI_KEYS)}")
-    print(f" BARK_KEY: {'✅ 已配置' if BARK_KEY else '❌ 未配置'}")
-    print("=" * 50)
-
-def _call_gemini(api_key, prompt):
-    model_attempts = [
-        ("v1", "gemini-2.0-flash"),
-        ("v1beta", "gemini-2.0-flash"),
-        ("v1", "gemini-1.5-flash"),
-    ]
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": "你是一位资深行业分析师...\n\n" + prompt}]}],
-    }
-    got_429 = False
-    for api_ver, model in model_attempts:
-        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
-        try:
-            resp = requests.post(url, json=payload, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            elif resp.status_code == 429:
-                got_429 = True
-        except: continue
-    return "__QUOTA_EXCEEDED__" if got_429 else "__ERROR__"
-
-def analyze_with_gemini(text):
-    if not GEMINI_KEYS: return None
-    prompt = f"请用中文总结以下科技动态，并分析对市场的潜在影响：\n\n{text}"
-    for key in GEMINI_KEYS:
-        result = _call_gemini(key, prompt)
-        if result not in ["__QUOTA_EXCEEDED__", "__ERROR__"]:
-            return result
-    return None
-
-def translate_to_chinese(text):
+def translate_to_zh(text):
+    """免費 Google 翻譯"""
     try:
         url = "https://translate.googleapis.com/translate_a/single"
-        params = {"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": text[:5000]}
+        params = {"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": text[:4000]}
         resp = requests.get(url, params=params, timeout=15)
-        if resp.status_code == 200:
-            return "".join([item[0] for item in resp.json()[0] if item[0]])
-    except: pass
-    return text
+        return "".join([item[0] for item in resp.json()[0] if item[0]])
+    except: return text
+
+def analyze_and_rate(text):
+    """利用 Gemini 總結並評級 (1-10)"""
+    if not GEMINI_KEYS: return "0|API_MISSING"
+    prompt = (
+        "你是一位資深行業分析師。請分析以下新聞：\n" + text +
+        "\n\n要求：1. 給出 1-10 的投資價值評分。2. 三句以內的中文總結。輸出格式：分數|總結"
+    )
+    # 優先嘗試 Gemini 2.0/3 系列模型
+    models = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    for key in GEMINI_KEYS:
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}"
+            try:
+                res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+                if res.status_code == 200:
+                    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except: continue
+    return "0|AI_FAILED"
+
+# --- 3. 推送功能 ---
 
 def push_bark(title, body):
-    if not BARK_KEY: return
-    try:
-        payload = {"device_key": BARK_KEY, "title": title, "body": body[:2000], "group": "情报雷达"}
-        requests.post(f"{BARK_SERVER}/push", json=payload, timeout=15)
-    except: pass
+    if BARK_KEY:
+        requests.post(f"{BARK_SERVER}/push", json={"device_key": BARK_KEY, "title": title, "body": body, "group": "AI情報"})
 
-def push_notion(title, summary, raw_news_list):
+def push_notion(title, summary, score):
     if not NOTION_TOKEN or not DATABASE_ID: return
     headers = {"Authorization": f"Bearer {NOTION_TOKEN}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
-    page_data = {
+    data = {
         "parent": {"database_id": DATABASE_ID},
         "properties": {
             "Name": {"title": [{"text": {"content": title}}]},
-            "Summary": {"rich_text": [{"text": {"content": summary[:2000]}}]},
+            "Summary": {"rich_text": [{"text": {"content": summary}}]},
+            "Score": {"number": score},
             "Date": {"date": {"start": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")}}
         }
     }
-    requests.post("https://api.notion.com/v1/pages", headers=headers, json=page_data, timeout=20)
+    requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
 
-# --------------------------------------------------------------------------- #
-# 主流程优化
-# --------------------------------------------------------------------------- #
+# --- 4. 主流程 ---
+
 def main():
-    print_config_check()
-    seen_news_set = load_seen_news()
+    if not init_firebase(): return
     
-    print("\n🚀 开始扫描情报源...")
-    new_collected_news = []
+    RSS_FEEDS = [
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+        {"name": "CNBC_Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"}
+    ]
 
     for feed_info in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(feed_info["url"])
-            for entry in feed.entries[:5]:
-                news_hash = get_news_hash(entry.title, feed_info['name'])
-                # 【去重判断】
-                if news_hash not in seen_news_set:
-                    new_collected_news.append({
-                        'text': f"【{feed_info['name']}】{entry.title}\n摘要: {entry.get('summary', '')[:200]}",
-                        'hash': news_hash
-                    })
-        except Exception as e:
-            print(f"⚠️ 拉取 {feed_info['name']} 失败")
+        print(f"📡 掃描: {feed_info['name']}")
+        feed = feedparser.parse(feed_info["url"])
+        
+        for entry in feed.entries[:5]:
+            news_hash = hashlib.md5(entry.title.encode()).hexdigest()
+            
+            # 1. Firebase 查重
+            if is_duplicate(news_hash): continue
 
-    # 【无新新闻则退出】
-    if not new_collected_news:
-        print("📭 今日无新动态，不执行推送，退出。")
-        return
+            # 2. AI 處理
+            raw_text = f"Title: {entry.title}\nSummary: {entry.get('summary', '')}"
+            ai_out = analyze_and_rate(raw_text)
+            
+            try:
+                score_str, summary = ai_out.split('|', 1)
+                score = int(''.join(filter(str.isdigit, score_str)))
+            except: score, summary = 0, ai_out
 
-    print(f"✨ 发现 {len(new_collected_news)} 条新情报！")
-    
-    # 准备待处理文本
-    full_text_for_ai = "\n\n".join([n['text'] for n in new_collected_news])
-    
-    # 尝试生成 AI 总结
-    summary = analyze_with_gemini(full_text_for_ai)
-
-    tz_cst = timezone(timedelta(hours=8))
-    push_title = f"情报雷达 · {datetime.now(tz_cst).strftime('%Y-%m-%d %H:%M')}"
-
-    # 【保留逻辑：配额耗尽则推原始摘要】
-    if not summary:
-        print("⚠️ AI 配额耗尽，发送原始新闻列表...")
-        bullet_lines = ["• " + n['text'].split('\n')[0] for n in new_collected_news[:8]]
-        summary = "⚠️ AI 总结失败（配额耗尽），今日新情报：\n\n" + "\n".join(bullet_lines)
-    
-    # 翻译并推送
-    summary_cn = translate_to_chinese(summary)
-    push_bark(push_title, summary_cn)
-    push_notion(push_title, summary, [n['text'] for n in new_collected_news])
-    
-    # 【更新记忆】只有发送成功后才更新本地文件
-    for n in new_collected_news:
-        seen_news_set.add(n['hash'])
-    save_seen_news(seen_news_set)
-    print("\n✅ 处理完成，去重数据库已更新。")
+            # 3. 判斷與推送
+            if score >= 7: # 只有高分才發手機
+                push_bark(f"🔥 重要({score}分): {feed_info['name']}", summary)
+            
+            push_notion(entry.title, summary, score)
+            mark_as_sent(news_hash, entry.title)
+            print(f"✅ 已處理: {entry.title[:20]} ({score}分)")
 
 if __name__ == "__main__":
     main()
