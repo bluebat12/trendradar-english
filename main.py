@@ -4,10 +4,7 @@ import feedparser
 from datetime import datetime, timezone, timedelta
 
 # --- 1. 环境参数配置 ---
-# 支持多个 Gemini Key 轮换：在 GitHub Secrets 中配置
-#   GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3 ...（最多支持5个）
-# 也兼容旧的单 Key 配置 GEMINI_API_KEY
-def _load_gemini_keys() -> list:
+def _load_gemini_keys():
     keys = []
     for i in range(1, 6):
         k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
@@ -34,14 +31,24 @@ RSS_FEEDS = [
 ]
 
 # --------------------------------------------------------------------------- #
-#  核心功能函数
+#  诊断启动：打印所有配置状态
 # --------------------------------------------------------------------------- #
+def print_config_check():
+    print("=" * 50)
+    print("🔍 配置检查")
+    print(f"  GEMINI Keys 数量: {len(GEMINI_KEYS)}")
+    for i, k in enumerate(GEMINI_KEYS, 1):
+        print(f"    Key-{i}: ...{k[-6:]} (长度={len(k)})")
+    print(f"  NOTION_TOKEN: {'✅ 已配置 (长度=' + str(len(NOTION_TOKEN)) + ')' if NOTION_TOKEN else '❌ 未配置'}")
+    print(f"  DATABASE_ID:  {'✅ 已配置 (长度=' + str(len(DATABASE_ID)) + ')' if DATABASE_ID else '❌ 未配置'}")
+    print(f"  BARK_KEY:     {'✅ 已配置 (长度=' + str(len(BARK_KEY)) + ')' if BARK_KEY else '❌ 未配置'}")
+    print(f"  BARK_SERVER:  {BARK_SERVER}")
+    print("=" * 50)
 
+# --------------------------------------------------------------------------- #
+#  Gemini
+# --------------------------------------------------------------------------- #
 def _call_gemini(api_key, prompt):
-    """
-    用单个 Key 尝试所有可用模型。
-    成功返回文本；配额耗尽返回 '__QUOTA_EXCEEDED__'；其他失败返回 None。
-    """
     model_attempts = [
         ("v1",     "gemini-2.0-flash"),
         ("v1beta", "gemini-2.0-flash"),
@@ -49,83 +56,72 @@ def _call_gemini(api_key, prompt):
         ("v1",     "gemini-1.5-flash"),
     ]
     payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。\n\n" + prompt}]
-            }
-        ],
+        "contents": [{"role": "user", "parts": [{"text": "你是一位资深行业分析师，擅长从 RSS 摘要中提取关键投资信息。\n\n" + prompt}]}],
         "generationConfig": {"temperature": 0.7},
     }
-
-    all_quota = True  # 是否所有失败都是 429
-
+    all_quota = True
     for api_ver, model in model_attempts:
-        url = (
-            f"https://generativelanguage.googleapis.com/{api_ver}"
-            f"/models/{model}:generateContent?key={api_key}"
-        )
+        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
         try:
             resp = requests.post(url, json=payload, timeout=30)
+            print(f"    [{api_ver}/{model}] HTTP {resp.status_code}")
             if resp.status_code == 200:
                 data = resp.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
             elif resp.status_code == 429:
-                print(f"    ⚠️  {api_ver}/{model}: 配额耗尽 (429)")
+                all_quota = True
                 continue
             elif resp.status_code == 404:
-                print(f"    ⚠️  {api_ver}/{model}: 不支持 (404)")
                 all_quota = False
                 continue
             else:
-                print(f"    ❌ {api_ver}/{model}: 错误 [{resp.status_code}] {resp.text[:150]}")
+                # 打印完整错误帮助诊断
+                print(f"    ❌ 完整错误: {resp.text[:300]}")
                 all_quota = False
                 return None
         except Exception as e:
-            print(f"    ❌ 请求异常 ({model}): {e}")
+            print(f"    ❌ 请求异常: {e}")
             all_quota = False
-
     return "__QUOTA_EXCEEDED__" if all_quota else None
 
 
 def analyze_with_gemini(text):
-    """轮换所有配置的 Gemini Key，配额耗尽自动切换下一个。"""
     if not GEMINI_KEYS:
-        print("❌ 错误: 未找到任何 Gemini Key，请在 GitHub Secrets 中配置")
+        print("❌ 未找到任何 Gemini Key")
         return None
-
-    print(f"🔑 共加载 {len(GEMINI_KEYS)} 个 Gemini Key")
-
     prompt = (
         "请用中文总结以下科技动态，并分析对市场的潜在影响。"
         "格式：先给出3句话的整体概述，再逐条列出每条要点（不超过5条）。\n\n"
         f"{text}"
     )
-
     for idx, key in enumerate(GEMINI_KEYS, start=1):
-        key_label = f"Key-{idx} (...{key[-6:]})"
+        key_label = f"Key-{idx}(...{key[-6:]})"
         print(f"  🔄 尝试 {key_label}")
         result = _call_gemini(key, prompt)
-
         if result == "__QUOTA_EXCEEDED__":
-            print(f"  ⚠️  {key_label} 配额已耗尽，切换下一个 Key...")
+            print(f"  ⚠️  {key_label} 配额耗尽，切换下一个...")
             continue
         elif result is not None:
-            print(f"  ✅ {key_label} 调用成功")
+            print(f"  ✅ {key_label} 成功，摘要长度={len(result)} 字符")
             return result
         else:
-            print(f"  ❌ {key_label} 调用失败（非配额问题）")
+            print(f"  ❌ {key_label} 失败（非配额问题），终止")
             return None
-
-    print("❌ 所有 Gemini Key 配额均已耗尽，请明天再试或添加新 Key")
+    print("❌ 所有 Key 配额耗尽")
     return None
 
-
+# --------------------------------------------------------------------------- #
+#  Bark
+# --------------------------------------------------------------------------- #
 def push_bark(title, body):
-    """推送到 Bark（POST 方式）"""
     if not BARK_KEY:
-        print("⚠️  未配置 BARK_KEY，跳过 Bark 推送")
+        print("⚠️  BARK_KEY 未配置，跳过")
         return False
+    print(f"\n📲 开始 Bark 推送...")
+    print(f"  URL: {BARK_SERVER}/push")
+    print(f"  device_key 末6位: ...{BARK_KEY[-6:]}")
+    print(f"  title: {title}")
+    print(f"  body 长度: {len(body)} 字符")
     try:
         url = f"{BARK_SERVER}/push"
         payload = {
@@ -136,23 +132,27 @@ def push_bark(title, body):
             "group": "情报雷达",
         }
         resp = requests.post(url, json=payload, timeout=15)
+        print(f"  HTTP 状态: {resp.status_code}")
+        print(f"  响应内容: {resp.text[:300]}")
         if resp.status_code == 200 and resp.json().get("code") == 200:
-            print("📲 Bark 推送成功")
+            print("  ✅ Bark 推送成功")
             return True
         else:
-            print(f"⚠️  Bark 推送失败: {resp.status_code} {resp.text[:200]}")
+            print("  ❌ Bark 推送失败（见上方响应内容）")
             return False
     except Exception as e:
-        print(f"❌ Bark 推送异常: {e}")
+        print(f"  ❌ Bark 推送异常: {e}")
         return False
 
-
+# --------------------------------------------------------------------------- #
+#  Notion
+# --------------------------------------------------------------------------- #
 def push_notion(title, summary, raw_news):
-    """将摘要写入 Notion 数据库"""
     if not NOTION_TOKEN or not DATABASE_ID:
-        print("⚠️  未配置 NOTION_TOKEN 或 DATABASE_ID，跳过 Notion 写入")
+        print("⚠️  NOTION_TOKEN 或 DATABASE_ID 未配置，跳过")
         return False
-
+    print(f"\n📓 开始 Notion 写入...")
+    print(f"  DATABASE_ID 末8位: ...{DATABASE_ID[-8:]}")
     tz_cst = timezone(timedelta(hours=8))
     today_str = datetime.now(tz_cst).strftime("%Y-%m-%d")
     headers = {
@@ -177,29 +177,32 @@ def push_notion(title, summary, raw_news):
             json=page_data,
             timeout=20,
         )
+        print(f"  HTTP 状态: {resp.status_code}")
+        print(f"  响应内容: {resp.text[:500]}")
         if resp.status_code == 200:
-            print(f"📓 Notion 写入成功: {resp.json().get('url', '')}")
+            print(f"  ✅ Notion 写入成功")
             return True
         else:
-            print(f"⚠️  Notion 写入失败: {resp.status_code} {resp.text[:300]}")
+            print("  ❌ Notion 写入失败（见上方响应内容）")
             return False
     except Exception as e:
-        print(f"❌ Notion 写入异常: {e}")
+        print(f"  ❌ Notion 写入异常: {e}")
         return False
-
 
 # --------------------------------------------------------------------------- #
 #  主流程
 # --------------------------------------------------------------------------- #
-
 def main():
-    print("🚀 开始扫描情报源...")
+    print_config_check()
+    print("\n🚀 开始扫描情报源...")
     collected_news = []
 
     for feed_info in RSS_FEEDS:
         print(f"📡 正在拉取: {feed_info['name']}")
         try:
             feed = feedparser.parse(feed_info["url"])
+            count = len(feed.entries[:3])
+            print(f"   获取到 {count} 条")
             for entry in feed.entries[:3]:
                 news_item = (
                     f"【{feed_info['name']}】{entry.title}\n"
@@ -221,7 +224,7 @@ def main():
         print("⚠️  未能生成 AI 总结，流程终止")
         return
 
-    print("\n📝 AI 总结:\n", summary)
+    print("\n📝 AI 总结 (前200字):\n", summary[:200], "...")
 
     tz_cst = timezone(timedelta(hours=8))
     today_label = datetime.now(tz_cst).strftime("%Y-%m-%d")
@@ -230,6 +233,7 @@ def main():
     push_bark(push_title, summary)
     push_notion(push_title, summary, collected_news)
 
+    print("\n✅ 全部完成")
 
 if __name__ == "__main__":
     main()
