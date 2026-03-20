@@ -241,14 +241,26 @@ def main():
     print(f"\n📰 共收集到 {len(collected_news)} 条新闻，正在生成 AI 总结...")
     summary = analyze_with_gemini("\n\n".join(collected_news))
 
+    tz_cst = timezone(timedelta(hours=8))
+    push_title = f"情报雷达 · {datetime.now(tz_cst).strftime('%Y-%m-%d')}"
+
     if not summary:
-        print("⚠️  未能生成 AI 总结，流程终止")
+        # 即使没有 AI 总结，也生成一个简略版本用于通知
+        print("⚠️  未能生成 AI 总结，使用原始新闻摘要...")
+        # 将原始新闻压缩为摘要
+        raw_summary = "\n".join([
+            f"• {line.split('】')[1].split('\n')[0][:100]}"
+            for line in collected_news[:5]
+        ])
+        summary = f"⚠️ AI 总结生成失败（配额耗尽），以下是今日原始新闻摘要：\n\n{raw_summary}\n\n共抓取 {len(collected_news)} 条新闻，请访问情报雷达查看详情。"
+
+        # 仍然尝试发送通知（使用错误提示）
+        push_bark(push_title + " ⚠️", summary)
+        push_notion(push_title, summary, collected_news)
+        print("\n✅ 通知已发送（无 AI 总结）")
         return
 
     print("\n📝 AI 总结 (前200字):\n", summary[:200], "...")
-
-    tz_cst = timezone(timedelta(hours=8))
-    push_title = f"情报雷达 · {datetime.now(tz_cst).strftime('%Y-%m-%d')}"
 
     push_bark(push_title, summary)
     push_notion(push_title, summary, collected_news)
