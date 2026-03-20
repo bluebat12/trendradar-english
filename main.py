@@ -247,12 +247,19 @@ def main():
     if not summary:
         # 即使没有 AI 总结，也生成一个简略版本用于通知
         print("⚠️  未能生成 AI 总结，使用原始新闻摘要...")
-        # 将原始新闻压缩为摘要
-        raw_summary = "\n".join([
-            f"• {line.split('】')[1].split('\n')[0][:100]}"
-            for line in collected_news[:5]
-        ])
-        summary = f"⚠️ AI 总结生成失败（配额耗尽），以下是今日原始新闻摘要：\n\n{raw_summary}\n\n共抓取 {len(collected_news)} 条新闻，请访问情报雷达查看详情。"
+        # 将原始新闻压缩为摘要（修复：不在 f-string 中使用反斜杠）
+        bullet_lines = []
+        for line in collected_news[:5]:
+            parts = line.split('】')
+            if len(parts) > 1:
+                title_part = parts[1].split('\n')[0][:100]
+                bullet_lines.append("• " + title_part)
+        raw_summary = "\n".join(bullet_lines)
+        newline = "\n"
+        summary = ("⚠️ AI 总结生成失败（配额耗尽），以下是今日原始新闻摘要："
+                    + newline + newline + raw_summary
+                    + newline + newline + "共抓取 "
+                    + str(len(collected_news)) + " 条新闻，请访问情报雷达查看详情。")
 
         # 仍然尝试发送通知（使用错误提示）
         push_bark(push_title + " ⚠️", summary)
