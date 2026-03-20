@@ -1,4 +1,4 @@
-name: Global English Intelligence Scout
+name: Global Intelligence Scout (Firebase Edition)
 
 on:
   schedule:
@@ -8,14 +8,10 @@ on:
 jobs:
   run-scout:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # 必须开启写入权限
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true 
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,26 +19,22 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install requests feedparser
+        run: |
+          pip install requests feedparser firebase-admin
 
-      - name: Run TrendRadar Scanner
+      - name: Run Scanner
         env:
+          # Firebase 配置 (從 GitHub Secrets 讀取)
+          FIREBASE_CONFIG_JSON: ${{ secrets.FIREBASE_CONFIG_JSON }}
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          
+          # Gemini 配置
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          
+          # 推送配置
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
         run: python main.py
-
-      # 【核心：将去重记录同步到仓库】
-      - name: Sync Seen News
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          if [ -f seen_news.json ]; then
-            git add seen_news.json
-            git commit -m "chore: update seen news database [skip ci]" || echo "No changes to commit"
-            git push
-          fi
