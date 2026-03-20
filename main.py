@@ -142,7 +142,7 @@ def main():
 
             # 執行推送
             # 門檻設為 7 分，你可以根據需求調整
-            if score >= 7:
+            if score >= 0:
                 push_bark(f"🔥 重磅({score}分): {entry.title[:30]}...", summary)
                 print(f"🚀 已推送高分情報: {entry.title[:20]}")
             
