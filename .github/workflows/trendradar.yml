@@ -2,9 +2,8 @@ name: Global English Intelligence Scout
 
 on:
   schedule:
-    # 每天北京时间上午 9:00 运行 (UTC 1:00)
-    - cron: '0 1 * * *'
-  workflow_dispatch: # 允许在 GitHub 页面手动点击运行
+    - cron: '0 1 * * *'  # 每天北京时间上午 9:00 (UTC 1:00)
+  workflow_dispatch:
 
 jobs:
   run-scout:
@@ -29,9 +28,11 @@ jobs:
 
       - name: Run TrendRadar Scanner
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BARK_KEY: ${{ secrets.BARK_KEY }}
-          BARK_SERVER: ${{ secrets.BARK_SERVER }}
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          BARK_KEY:         ${{ secrets.BARK_KEY }}
+          BARK_SERVER:      ${{ secrets.BARK_SERVER }}
+          NOTION_TOKEN:     ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID:      ${{ secrets.DATABASE_ID }}
         run: python main.py
