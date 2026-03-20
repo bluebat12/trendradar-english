@@ -56,6 +56,8 @@ def _call_gemini(api_key, prompt):
     - 遇到真正错误(非429/404): 返回 '__ERROR__' → 调用方终止
     """
     model_attempts = [
+        ("v1",     "gemini-2.5-flash"),
+        ("v1",     "gemini-2.0-flash-lite"),
         ("v1",     "gemini-2.0-flash"),
         ("v1beta", "gemini-2.0-flash"),
         ("v1beta", "gemini-1.5-flash"),
