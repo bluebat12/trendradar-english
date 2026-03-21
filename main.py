@@ -153,6 +153,15 @@ def main():
 
     RSS_FEEDS = [
         {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/10468593379488795476"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/5573632328866507271"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/12658923786557718878"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/2601960625698782407"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/11330977868525907062"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/15131987033820237330"},
+        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/15077444616124068808"},
         {"name": "CNBC_Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"}
     ]
 
