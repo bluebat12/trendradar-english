@@ -9,15 +9,11 @@ jobs:
   run-scout:
     runs-on: ubuntu-latest
 
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true  # 保留凭据以便后续推送
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,7 +30,6 @@ jobs:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -42,6 +37,7 @@ jobs:
         run: python main.py
 
       - name: Commit updated sent_news
+        if: always()  # 即使程序出错也尝试提交
         run: |
           if [ -f sent_news_hashes.json ]; then
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
