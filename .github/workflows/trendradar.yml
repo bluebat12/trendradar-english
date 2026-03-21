@@ -2,16 +2,22 @@ name: TrendRadar Intelligence Scout
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # 每30分鐘自動運行
-  workflow_dispatch: # 支持手動運行
+    - cron: '*/30 * * * *'  # 每30分钟自动运行
+  workflow_dispatch:
 
 jobs:
   run-scout:
     runs-on: ubuntu-latest
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,17 +30,23 @@ jobs:
 
       - name: Run TrendRadar
         env:
-          # Firebase
           FIREBASE_CONFIG_JSON: ${{ secrets.FIREBASE_CONFIG_JSON }}
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
-          
-          # Gemini (建議至少填寫兩個，增加容錯)
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          
-          # Push
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
         run: python main.py
+
+      - name: Commit updated sent_news
+        run: |
+          if [ -f sent_news_hashes.json ]; then
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add sent_news_hashes.json
+            git diff --cached --quiet || git commit -m "📝 Update sent news records [skip ci]"
+            git push
+          fi
