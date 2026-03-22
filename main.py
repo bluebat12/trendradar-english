@@ -3,239 +3,364 @@ import requests
 import feedparser
 import json
 import hashlib
-import time
-import firebase_admin
-from firebase_admin import credentials, db
 from datetime import datetime, timezone, timedelta
+from datetime import datetime as dt
 
-# --- 1. 配置与环境变量 ---
+# --- 1. 环境参数配置 ---
 def _load_gemini_keys():
     keys = []
     for i in range(1, 6):
         k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
-        if k: keys.append(k)
+        if k:
+            keys.append(k)
+    single = os.getenv("GEMINI_API_KEY", "").strip()
+    if single and single not in keys:
+        keys.append(single)
     return keys
 
-GEMINI_KEYS = _load_gemini_keys()
-BARK_KEY = os.getenv("BARK_KEY")
-BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
+GEMINI_KEYS  = _load_gemini_keys()
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("DATABASE_ID")
+DATABASE_ID  = os.getenv("DATABASE_ID")
+BARK_KEY     = os.getenv("BARK_KEY")
+BARK_SERVER  = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
 
-# --- 2. Firebase 初始化 ---
-def init_firebase():
-    firebase_json = os.getenv("FIREBASE_CONFIG_JSON")
-    firebase_url = os.getenv("FIREBASE_URL")
-    if not firebase_json or not firebase_url:
-        print("⚠️ Firebase 配置缺失")
-        return False
-    try:
-        cred_dict = json.loads(firebase_json)
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred, {'databaseURL': firebase_url})
-        return True
-    except Exception as e:
-        print(f"❌ Firebase 初始化失败: {e}")
-        return False
+# --- 2. 已推送新闻记录文件 ---
+SENT_NEWS_FILE = "sent_news_hashes.json"
 
-def is_duplicate(news_hash):
-    """检查新闻是否已推送"""
-    try:
-        return db.reference(f'seen_news/{news_hash}').get() is not None
-    except:
-        return False
+def load_sent_hashes():
+    """加载已推送的新闻哈希记录"""
+    if os.path.exists(SENT_NEWS_FILE):
+        try:
+            with open(SENT_NEWS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 清理超过7天的记录
+                cutoff = (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=7)).isoformat()
+                data = {k: v for k, v in data.items() if v > cutoff}
+                return set(data.keys()), data
+        except:
+            pass
+    return set(), {}
 
-def mark_as_sent(news_hash, title):
-    """标记新闻已推送"""
-    try:
-        db.reference(f'seen_news/{news_hash}').set({
-            'title': title[:100],
-            'time': datetime.now(timezone(timedelta(hours=8))).isoformat()
-        })
-    except:
-        pass
+def save_sent_hashes(hashes_dict):
+    """保存已推送的新闻哈希记录"""
+    with open(SENT_NEWS_FILE, "w", encoding="utf-8") as f:
+        json.dump(hashes_dict, f, ensure_ascii=False, indent=2)
 
-def get_all_seen_hashes():
-    """获取所有已推送的新闻哈希"""
-    try:
-        data = db.reference('seen_news').get()
-        return set(data.keys()) if data else set()
-    except:
-        return set()
+def get_news_hash(title, source):
+    """生成新闻的唯一哈希"""
+    content = f"{source}:{title}"
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
 
-# --- 3. AI 核心：分析与总结 ---
-def analyze_and_rate(text):
+# --- 3. RSS 情报源 ---
+RSS_FEEDS = [
+    {"name": "Intel_Finance",  "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
+    {"name": "Intel_Tech_18A", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
+    {"name": "Intel_Subsidy",  "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
+    {"name": "CNBC Tech",      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"},
+    {"name": "FDA Press",      "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
+]
+
+# --------------------------------------------------------------------------- #
+#  诊断启动
+# --------------------------------------------------------------------------- #
+def print_config_check():
+    print("=" * 50)
+    print("🔍 配置检查")
+    print(f"  GEMINI Keys 数量: {len(GEMINI_KEYS)}")
+    for i, k in enumerate(GEMINI_KEYS, 1):
+        print(f"    Key-{i}: ...{k[-6:]} (长度={len(k)})")
+    print(f"  NOTION_TOKEN: {'✅ 已配置 (长度=' + str(len(NOTION_TOKEN)) + ')' if NOTION_TOKEN else '❌ 未配置'}")
+    print(f"  DATABASE_ID:  {'✅ 已配置 (长度=' + str(len(DATABASE_ID)) + ')' if DATABASE_ID else '❌ 未配置'}")
+    print(f"  BARK_KEY:     {'✅ 已配置 (长度=' + str(len(BARK_KEY)) + ')' if BARK_KEY else '❌ 未配置'}")
+    print(f"  BARK_SERVER:  {BARK_SERVER}")
+    print("=" * 50)
+
+# --------------------------------------------------------------------------- #
+#  Gemini API 调用（带速率限制处理）
+# --------------------------------------------------------------------------- #
+def _call_gemini(api_key, prompt, max_tokens=500):
+    """
+    用单个 Key 尝试所有模型。
+    - 成功: 返回文本
+    - 该 Key 所有模型均 429: 返回 '__QUOTA_EXCEEDED__' → 调用方切换下一个 Key
+    - 遇到真正错误(非429/404): 返回 '__ERROR__' → 调用方终止
+    """
+    model_attempts = [
+        ("v1",     "gemini-2.5-flash", 15000),
+        ("v1",     "gemini-2.0-flash-lite", 8000),
+        ("v1",     "gemini-2.0-flash", 8000),
+        ("v1beta", "gemini-2.0-flash", 8000),
+        ("v1beta", "gemini-1.5-flash", 8000),
+        ("v1",     "gemini-1.5-flash", 8000),
+    ]
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": max_tokens,  # 限制输出 token 数
+        },
+    }
+
+    got_429 = False
+
+    for api_ver, model, _ in model_attempts:
+        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
+        try:
+            resp = requests.post(url, json=payload, timeout=30)
+            code = resp.status_code
+            print(f"    [{api_ver}/{model}] HTTP {code}")
+
+            if code == 200:
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+
+            elif code == 429:
+                got_429 = True
+                continue
+
+            elif code == 404:
+                continue
+
+            else:
+                print(f"    ❌ 错误: {resp.text[:200]}")
+                return "__ERROR__"
+
+        except Exception as e:
+            print(f"    ❌ 请求异常: {e}")
+            return "__ERROR__"
+
+    if got_429:
+        return "__QUOTA_EXCEEDED__"
+    else:
+        return "__QUOTA_EXCEEDED__"
+
+
+def analyze_with_gemini(text, max_tokens=500):
+    """调用 Gemini API 生成总结（带备用方案）"""
     if not GEMINI_KEYS:
-        return "0|API_MISSING"
+        print("❌ 未找到任何 Gemini Key")
+        return None
 
+    print(f"🔑 共加载 {len(GEMINI_KEYS)} 个 Gemini Key")
     prompt = (
-        "You are a professional securities analyst. Analyze the following news:\n" + text +
-        "\n\nRequirements:\n1. Rate the investment value/market impact from 1-10.\n"
-        "2. Provide a 1-sentence summary in Chinese.\n"
-        "Output format: [Score]|[Summary]\n"
-        "Example: 8|英特尔宣布获得美国政府百亿美元补贴，利好制程发展。"
+        "请用中文简洁总结以下科技动态（控制在200字以内）：\n\n"
+        f"{text}"
     )
 
-    # 模型优先级（按配额从高到低）
-    models = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-flash"
-    ]
-    
-    for key in GEMINI_KEYS:
-        for model in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-            try:
-                res = requests.post(url, json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"maxOutputTokens": 100}
-                }, timeout=30)
-                if res.status_code == 200:
-                    out = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    if "|" in out:
-                        return out
-            except:
-                continue
-    return "0|AI_PROCESSING_FAILED"
+    for idx, key in enumerate(GEMINI_KEYS, start=1):
+        key_label = f"Key-{idx}(...{key[-6:]})"
+        print(f"  🔄 尝试 {key_label}")
+        result = _call_gemini(key, prompt, max_tokens)
 
-# --- 4. 推送功能 ---
-def push_bark(title, body):
-    if BARK_KEY:
-        try:
-            requests.post(f"{BARK_SERVER}/push", json={
-                "device_key": BARK_KEY,
-                "title": title,
-                "body": body,
-                "group": "情报雷达",
-            })
-        except Exception as e:
-            print(f"❌ Bark 推送失败: {e}")
+        if result == "__QUOTA_EXCEEDED__":
+            print(f"  ⚠️  {key_label} 配额耗尽，切换下一个...")
+            continue
+        elif result == "__ERROR__":
+            print(f"  ❌ {key_label} 遇到错误，终止")
+            return None
+        elif result is not None:
+            print(f"  ✅ {key_label} 调用成功")
+            return result
 
-def push_notion(title, summary, score):
+    print("❌ 所有 Gemini Key 均不可用")
+    return None
+
+# --------------------------------------------------------------------------- #
+#  免费翻译功能（使用 Google Translate）
+# --------------------------------------------------------------------------- #
+def translate_to_chinese(text):
+    """使用 Google Translate 免费接口将英文翻译为中文"""
+    if not text:
+        return text
+
+    print("🌐 正在翻译为中文...")
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "zh-CN",
+            "dt": "t",
+            "q": text[:5000]
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = "".join([item[0] for item in data[0] if item[0]])
+            print(f"  ✅ 翻译成功")
+            return translated
+        else:
+            print(f"  ⚠️ 翻译失败 HTTP {resp.status_code}")
+            return text
+    except Exception as e:
+        print(f"  ⚠️ 翻译异常: {e}")
+        return text
+
+# --------------------------------------------------------------------------- #
+#  Bark
+# --------------------------------------------------------------------------- #
+def push_bark(title, body, url_link=""):
+    """发送 Bark 推送"""
+    if not BARK_KEY:
+        print("⚠️  BARK_KEY 未配置，跳过")
+        return False
+    print(f"\n📲 开始 Bark 推送...")
+    try:
+        payload = {
+            "device_key": BARK_KEY,
+            "title": title,
+            "body": body[:2000],
+            "sound": "minuet",
+            "group": "情报雷达",
+        }
+        if url_link:
+            payload["url"] = url_link
+
+        resp = requests.post(f"{BARK_SERVER}/push", json=payload, timeout=15)
+        resp_data = resp.json()
+        print(f"  HTTP {resp.status_code}: {resp_data}")
+
+        if resp.status_code == 200 and resp_data.get("code") == 200:
+            print("  ✅ Bark 推送成功")
+            return True
+        else:
+            print(f"  ❌ Bark 推送失败: {resp_data.get('message', 'Unknown error')}")
+            return False
+    except Exception as e:
+        print(f"  ❌ Bark 推送异常: {e}")
+        return False
+
+# --------------------------------------------------------------------------- #
+#  Notion
+# --------------------------------------------------------------------------- #
+def push_notion(title, summary, raw_news):
+    """写入 Notion 数据库"""
     if not NOTION_TOKEN or not DATABASE_ID:
-        return
+        print("⚠️  NOTION_TOKEN 或 DATABASE_ID 未配置，跳过")
+        return False
+    print(f"\n📓 开始 Notion 写入...")
+    print(f"  DATABASE_ID: {DATABASE_ID[:8]}...")
+    tz_cst = timezone(timedelta(hours=8))
+    today_str = datetime.now(tz_cst).strftime("%Y-%m-%d")
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
+        "Notion-Version": "2022-06-28",
     }
-    data = {
+    sources = list({line.split("】")[0].lstrip("【") for line in raw_news if "】" in line})
+    page_data = {
         "parent": {"database_id": DATABASE_ID},
         "properties": {
-            "标题": {"title": [{"text": {"content": title[:100]}}]},
-            "AI摘要": {"rich_text": [{"text": {"content": summary[:500]}}]},
-            "评分": {"number": score},
-            "时间": {"date": {"start": datetime.now(timezone(timedelta(hours=8))).isoformat()}}
-        }
+            "Name":    {"title":     [{"text": {"content": title}}]},
+            "Summary": {"rich_text": [{"text": {"content": summary[:2000]}}]},
+            "Date":    {"date":      {"start": today_str}},
+            "Sources": {"rich_text": [{"text": {"content": ", ".join(sources)}}]},
+        },
     }
     try:
-        requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
-    except:
-        pass
+        resp = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=page_data,
+            timeout=20,
+        )
+        print(f"  HTTP {resp.status_code}")
+        resp_json = resp.json()
 
-# --- 5. 主流程 ---
+        if resp.status_code == 200:
+            print("  ✅ Notion 写入成功")
+            return True
+        elif resp.status_code == 400:
+            print(f"  ❌ 请求格式错误: {resp_json.get('message', resp.text[:200])}")
+        elif resp.status_code == 401:
+            print("  ❌ Token 无效")
+        elif resp.status_code == 403:
+            print("  ❌ 无权限访问数据库，请确认 Integration 已添加到数据库")
+        elif resp.status_code == 404:
+            print("  ❌ 数据库不存在")
+        else:
+            print(f"  ❌ 错误: {resp_json.get('message', resp.text[:200])}")
+        return False
+    except Exception as e:
+        print(f"  ❌ 异常: {e}")
+        return False
+
+# --------------------------------------------------------------------------- #
+#  主流程
+# --------------------------------------------------------------------------- #
 def main():
+    print_config_check()
+
+    # 加载已推送的新闻哈希
+    sent_hashes, sent_hashes_dict = load_sent_hashes()
+    print(f"\n📋 已加载 {len(sent_hashes)} 条历史推送记录")
+
     tz_cst = timezone(timedelta(hours=8))
     now = datetime.now(tz_cst)
-    print(f"\n{'='*50}")
-    print(f"🚀 TrendRadar 启动 ({now.strftime('%Y-%m-%d %H:%M')})")
-    print(f"{'='*50}")
+    print(f"\n🚀 开始扫描情报源... ({now.strftime('%H:%M:%S')})")
 
-    if not init_firebase():
-        print("❌ Firebase 初始化失败，程序退出")
-        return
+    new_news = []
+    new_hashes = set()
 
-    seen_hashes = get_all_seen_hashes()
-    print(f"📊 Firebase 中已有 {len(seen_hashes)} 条历史推送记录\n")
-
-    RSS_FEEDS = [
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446256904"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/7842163283446258095"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/3911216818205463334"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/10468593379488795476"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/5573632328866507271"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/12658923786557718878"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/2601960625698782407"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/11330977868525907062"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/15131987033820237330"},
-        {"name": "Intel_Finance", "url": "https://www.google.com/alerts/feeds/02859553752789820389/15077444616124068808"},
-        {"name": "CNBC_Tech", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910"}
-    ]
-
-    new_articles = []
-    total_checked = 0
-
-    print("📡 正在扫描 RSS 源...")
     for feed_info in RSS_FEEDS:
-        print(f"   扫描: {feed_info['name']}")
+        print(f"📡 正在拉取: {feed_info['name']}")
         try:
             feed = feedparser.parse(feed_info["url"])
-            for entry in feed.entries[:3]:
-                total_checked += 1
-                news_hash = hashlib.md5(entry.title.encode()).hexdigest()
-
-                if is_duplicate(news_hash):
-                    print(f"   ⏭️  已推送: {entry.title[:30]}...")
-                    continue
-
-                new_articles.append({
-                    'hash': news_hash,
-                    'title': entry.title,
-                    'summary': entry.get('summary', '')[:500],
-                    'source': feed_info['name']
-                })
-                print(f"   🆕 新发现: {entry.title[:30]}...")
-
+            # 只取最新1条，避免重复
+            for entry in feed.entries[:1]:
+                news_hash = get_news_hash(entry.title, feed_info['name'])
+                if news_hash not in sent_hashes:
+                    new_hashes.add(news_hash)
+                    new_news.append({
+                        "source": feed_info['name'],
+                        "title": entry.title,
+                        "summary": entry.get('summary', '')[:300],
+                        "link": entry.get('link', ''),
+                        "published": entry.get('published', ''),
+                        "hash": news_hash,
+                    })
+                    print(f"   🆕 新: {entry.title[:50]}...")
+                else:
+                    print(f"   ⏭️  已推送，跳过")
         except Exception as e:
-            print(f"   ⚠️ 扫描失败: {e}")
+            print(f"⚠️  拉取 {feed_info['name']} 失败: {e}")
 
-    print(f"\n{'='*50}")
-    print(f"📊 扫描统计:")
-    print(f"   • 检查新闻: {total_checked} 条")
-    print(f"   • 发现新新闻: {len(new_articles)} 条")
-    print(f"{'='*50}\n")
+    print(f"\n📊 统计: 新新闻 {len(new_news)} 条")
 
-    # 关键：无新新闻则不推送
-    if not new_articles:
-        print("📭 没有发现新新闻，结束运行（不推送通知）")
+    if not new_news:
+        print("📭 今日无新动态，退出")
         return
 
-    print(f"🆕 发现 {len(new_articles)} 条新新闻，开始处理...\n")
+    # 更新已推送记录
+    current_time = now.isoformat()
+    for h in new_hashes:
+        sent_hashes_dict[h] = current_time
+    save_sent_hashes(sent_hashes_dict)
 
-    for i, article in enumerate(new_articles):
-        print(f"[{i+1}/{len(new_articles)}] 处理: {article['title'][:40]}...")
+    # 为每条新闻单独推送
+    for news in new_news:
+        print(f"\n{'='*50}")
+        print(f"📰 处理: {news['title'][:60]}...")
 
-        raw_text = f"Title: {article['title']}\nContent: {article['summary']}"
-        ai_out = analyze_and_rate(raw_text)
+        # 生成总结
+        prompt = f"来源: {news['source']}\n标题: {news['title']}\n摘要: {news['summary']}"
+        summary = analyze_with_gemini(prompt, max_tokens=300)
 
-        try:
-            score_part, summary = ai_out.split('|', 1)
-            score = int(''.join(filter(str.isdigit, score_part)))
-        except:
-            score, summary = 0, ai_out
+        push_title = f"情报雷达 · {news['source']}"
 
-        MIN_SCORE = 5
-        if score >= MIN_SCORE:
-            push_bark(
-                f"🔥 {article['source']} ({score}分)",
-                f"{article['title']}\n\n{summary}"
-            )
-            print(f"   📱 已推送 Bark (评分: {score})")
+        if summary:
+            summary_cn = translate_to_chinese(summary)
+            push_bark(push_title, summary_cn, news['link'])
         else:
-            print(f"   ⏭️ 跳过推送 (评分: {score} < {MIN_SCORE})")
+            # 无 AI 总结时，翻译标题直接推送
+            title_cn = translate_to_chinese(news['title'])
+            push_bark(push_title, title_cn + "\n\n" + news['summary'][:200], news['link'])
 
-        push_notion(article['title'], summary, score)
-        mark_as_sent(article['hash'], article['title'])
-        print(f"   💾 已存入 Firebase")
+        # 同时写入 Notion
+        push_notion(push_title, news['summary'], [f"【{news['source']}】{news['title']}"])
 
-        time.sleep(12)
-
-    print(f"\n{'='*50}")
-    print(f"✅ 处理完成！共处理 {len(new_articles)} 条新闻")
-    print(f"{'='*50}")
+    print("\n" + "="*50)
+    print(f"✅ 完成！共处理 {len(new_news)} 条新闻")
 
 if __name__ == "__main__":
     main()
