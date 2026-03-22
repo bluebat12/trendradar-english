@@ -206,10 +206,16 @@ def push_bark(title, body, url_link=""):
         return False
     print(f"\n📲 开始 Bark 推送...")
     try:
+        # 清理 body 中的 HTML 标签，控制长度
+        import re
+        body_clean = re.sub(r'<[^>]+>', '', body)  # 移除 HTML 标签
+        body_clean = re.sub(r'\s+', ' ', body_clean).strip()  # 合并空白字符
+        body_clean = body_clean[:500]  # 限制总长度
+
         payload = {
             "device_key": BARK_KEY,
             "title": title,
-            "body": body[:2000],
+            "body": body_clean,
             "sound": "minuet",
             "group": "情报雷达",
         }
@@ -286,6 +292,19 @@ def push_notion(title, summary, raw_news):
         return False
 
 # --------------------------------------------------------------------------- #
+#  关键词提取
+# --------------------------------------------------------------------------- #
+def extract_keywords(title, summary, max_keywords=3):
+    """从标题和摘要中提取关键词"""
+    # 提取英文关键词
+    import re
+    words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', title + ' ' + summary[:500])
+    # 常见噪声词
+    stopwords = {'The', 'This', 'That', 'These', 'Those', 'For', 'And', 'But', 'With', 'From', 'About', 'How', 'What', 'When', 'Where', 'Why', 'Who', 'Which', 'Google', 'Apple', 'Amazon'}
+    keywords = [w for w in words if w not in stopwords and len(w) > 2][:max_keywords]
+    return keywords
+
+# --------------------------------------------------------------------------- #
 #  主流程
 # --------------------------------------------------------------------------- #
 def main():
@@ -342,22 +361,31 @@ def main():
         print(f"\n{'='*50}")
         print(f"📰 处理: {news['title'][:60]}...")
 
-        # 生成总结
-        prompt = f"来源: {news['source']}\n标题: {news['title']}\n摘要: {news['summary']}"
-        summary = analyze_with_gemini(prompt, max_tokens=300)
+        # 提取关键词
+        keywords = extract_keywords(news['title'], news['summary'])
+        keyword_str = ' · '.join(keywords) if keywords else news['source']
 
-        push_title = f"情报雷达 · {news['source']}"
+        # 生成总结（更简洁的提示词）
+        prompt = f"标题: {news['title']}\n摘要: {news['summary'][:800]}"
+        summary = analyze_with_gemini(prompt, max_tokens=150)  # 减少 token 限制
+
+        push_title = f"📡 {news['source']}"
 
         if summary:
             summary_cn = translate_to_chinese(summary)
-            push_bark(push_title, summary_cn, news['link'])
+            # 简洁格式：关键词 + 一句话总结
+            push_body = f"【{keyword_str}】\n{summary_cn}"
         else:
-            # 无 AI 总结时，翻译标题直接推送
+            # 无 AI 总结时，翻译标题作为摘要
             title_cn = translate_to_chinese(news['title'])
-            push_bark(push_title, title_cn + "\n\n" + news['summary'][:200], news['link'])
+            push_body = f"【{keyword_str}】\n{title_cn}"
+
+        push_bark(push_title, push_body, news['link'])
 
         # 同时写入 Notion
-        push_notion(push_title, news['summary'], [f"【{news['source']}】{news['title']}"])
+        notion_title = f"情报雷达 · {news['source']}"
+        notion_body = summary if summary else news['title']
+        push_notion(notion_title, notion_body, [f"【{news['source']}】{news['title']}"])
 
     print("\n" + "="*50)
     print(f"✅ 完成！共处理 {len(new_news)} 条新闻")
