@@ -1,0 +1,39 @@
+name: Google Alerts Scout
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 每小时整点运行
+  workflow_dispatch:    # 支持手动触发
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Deps
+        run: pip install requests feedparser
+
+      - name: Run Alerts
+        env:
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          BARK_SERVER: ${{ secrets.BARK_SERVER }}
+        run: python alerts_radar.py
+
+      - name: Commit changes
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add seen_news.json
+          git commit -m "update seen_news [skip ci]" || exit 0
+          git push
