@@ -2,7 +2,7 @@ name: TrendRadar Intelligence Scout
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 每天北京时间 09:00 运行
+    - cron: '0 1 * * *'   # 每天北京时间 09:00（UTC 01:00）
   workflow_dispatch:
 
 jobs:
