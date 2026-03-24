@@ -2,8 +2,8 @@ name: Google Alerts Scout
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 每小时整点运行
-  workflow_dispatch:    # 支持手动触发
+    - cron: '*/15 * * * *'   # 每 15 分钟运行
+  workflow_dispatch:
 
 jobs:
   scout:
@@ -25,15 +25,15 @@ jobs:
       - name: Run Alerts
         env:
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
-          BARK_KEY: ${{ secrets.BARK_KEY }}
-          BARK_SERVER: ${{ secrets.BARK_SERVER }}
+          BARK_KEY:         ${{ secrets.BARK_KEY }}
+          BARK_SERVER:      ${{ secrets.BARK_SERVER }}
         run: python alerts_radar.py
 
-      - name: Commit changes
+      - name: Commit seen records
         if: always()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add seen_news.json
-          git commit -m "update seen_news [skip ci]" || exit 0
+          git add seen_hot.json seen_warm.json || true
+          git commit -m "update seen records [skip ci]" || exit 0
           git push
