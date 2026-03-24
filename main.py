@@ -50,6 +50,17 @@ RSS_FEEDS = [
     {"name": "MIT Tech Review",   "url": "https://www.technologyreview.com/feed/"},
     # 政策/监管
     {"name": "FDA Press",         "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml"},
+    # 🟢 低频层（从 alerts_radar.py 移过来，每天汇总即可）
+    # AI/量子/核聚变 学术突破
+    {"name": "Science_Breakthrough", "url": "https://www.google.com/alerts/feeds/02859553752789820389/12658923786557718878"},
+    # 自动驾驶/机器人/基因编辑 里程碑
+    {"name": "Tech_Milestone",        "url": "https://www.google.com/alerts/feeds/02859553752789820389/2601960625698782407"},
+    # 生物年龄逆转/senolytics
+    {"name": "Longevity_Science",     "url": "https://www.google.com/alerts/feeds/02859553752789820389/11330977868525907062"},
+    # longevity 临床试验
+    {"name": "Longevity_Trial",       "url": "https://www.google.com/alerts/feeds/02859553752789820389/15131987033820237330"},
+    # 疫情预警/AI病原体检测
+    {"name": "Pandemic_Watch",        "url": "https://www.google.com/alerts/feeds/02859553752789820389/15077444616124068808"},
 ]
 
 # --------------------------------------------------------------------------- #
