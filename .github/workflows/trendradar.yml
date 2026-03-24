@@ -2,7 +2,7 @@ name: TrendRadar Intelligence Scout
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # 每30分钟自动运行
+    - cron: '0 1 * * *'   # 每天北京时间 09:00 运行
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # 保留凭据以便后续推送
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,28 +21,24 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: |
-          pip install requests feedparser firebase-admin
+        run: pip install requests feedparser
 
       - name: Run TrendRadar
         env:
-          FIREBASE_CONFIG_JSON: ${{ secrets.FIREBASE_CONFIG_JSON }}
-          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          BARK_KEY: ${{ secrets.BARK_KEY }}
-          BARK_SERVER: ${{ secrets.BARK_SERVER }}
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          BARK_KEY:         ${{ secrets.BARK_KEY }}
+          BARK_SERVER:      ${{ secrets.BARK_SERVER }}
+          NOTION_TOKEN:     ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID:      ${{ secrets.DATABASE_ID }}
         run: python main.py
 
-      - name: Commit updated sent_news
-        if: always()  # 即使程序出错也尝试提交
+      - name: Commit sent records
+        if: always()
         run: |
-          if [ -f sent_news_hashes.json ]; then
-            git config --local user.email "github-actions[bot]@users.noreply.github.com"
-            git config --local user.name "github-actions[bot]"
-            git add sent_news_hashes.json
-            git diff --cached --quiet || git commit -m "📝 Update sent news records [skip ci]"
-            git push
-          fi
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add sent_news_hashes.json
+          git diff --cached --quiet || git commit -m "📝 Update sent records [skip ci]"
+          git push
