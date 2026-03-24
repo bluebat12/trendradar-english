@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import feedparser
 import json
@@ -24,7 +25,6 @@ RSS_FEEDS = [
     {"name": "Alert_10",        "url": "https://www.google.com/alerts/feeds/02859553752789820389/15077444616124068808"},
 ]
 
-# 去重记录文件
 SENT_FILE = "seen_news.json"
 
 # --------------------------------------------------------------------------- #
@@ -35,7 +35,6 @@ def load_seen():
         try:
             with open(SENT_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # 只保留最近 7 天
             cutoff = (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=7)).isoformat()
             return {k: v for k, v in data.items() if v > cutoff}
         except:
@@ -46,10 +45,42 @@ def save_seen(seen):
     with open(SENT_FILE, "w", encoding="utf-8") as f:
         json.dump(seen, f, ensure_ascii=False, indent=2)
 
+def clean_html(text):
+    """移除 HTML 标签"""
+    return re.sub(r'<[^>]+>', '', text).strip()
+
 # --------------------------------------------------------------------------- #
-#  Gemini AI 归纳翻译（尝试多个模型）
+#  Google Translate 免费翻译（无需 API Key）
 # --------------------------------------------------------------------------- #
-def analyze_and_translate(text_content):
+def translate_to_chinese(text):
+    """使用 Google Translate 免费接口翻译为简体中文，无需任何 Key"""
+    if not text:
+        return text
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "zh-CN",
+            "dt": "t",
+            "q": text[:4500],
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = "".join([seg[0] for seg in data[0] if seg[0]])
+            return translated
+        else:
+            print(f"  ⚠️ 翻译失败 HTTP {resp.status_code}")
+            return text
+    except Exception as e:
+        print(f"  ⚠️ 翻译异常: {e}")
+        return text
+
+# --------------------------------------------------------------------------- #
+#  Gemini AI 归纳（可选，失败时降级为纯翻译）
+# --------------------------------------------------------------------------- #
+def analyze_with_gemini(text_content):
     if not GEMINI_KEY or not text_content:
         return None
 
@@ -59,8 +90,8 @@ def analyze_and_translate(text_content):
 
 任务：
 1. 归纳核心要点（多条相关新闻请合并）
-2. 翻译为繁体中文
-3. 精炼语言，用 Markdown 列表格式输出，控制在300字以内
+2. 翻译为简体中文
+3. 用 Markdown 列表格式输出，控制在300字以内
 """
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
@@ -88,7 +119,7 @@ def analyze_and_translate(text_content):
             print(f"    ❌ 异常: {e}")
             return None
 
-    print("    ⚠️ 所有模型均不可用")
+    print("    ⚠️ 所有模型均不可用，降级为纯翻译")
     return None
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +153,7 @@ def push_bark(title, content):
 def main():
     seen = load_seen()
     new_items = []
+    new_titles = []  # 纯标题列表，用于保底翻译
     now_cst = datetime.now(timezone(timedelta(hours=8)))
     current_time = now_cst.isoformat()
 
@@ -134,10 +166,12 @@ def main():
             for entry in d.entries:
                 uid = hashlib.md5(entry.get("link", entry.title).encode()).hexdigest()
                 if uid not in seen:
-                    summary = entry.get("summary", "")[:300]
-                    new_items.append(f"标题: {entry.title}\n摘要: {summary}")
+                    title_clean = clean_html(entry.title)
+                    summary_clean = clean_html(entry.get("summary", ""))[:300]
+                    new_items.append(f"标题: {title_clean}\n摘要: {summary_clean}")
+                    new_titles.append(f"[{feed['name']}] {title_clean}")
                     seen[uid] = current_time
-                    print(f"   🆕 [{feed['name']}] {entry.title[:60]}")
+                    print(f"   🆕 [{feed['name']}] {title_clean[:60]}")
         except Exception as e:
             print(f"   ⚠️ 拉取 {feed['name']} 失败: {e}")
 
@@ -146,20 +180,28 @@ def main():
         save_seen(seen)
         return
 
-    print(f"\n🤖 发现 {len(new_items)} 条新情报，正在 AI 归纳...")
+    print(f"\n🤖 发现 {len(new_items)} 条新情报，尝试 AI 归纳...")
     full_text = "\n---\n".join(new_items)
-    ai_result = analyze_and_translate(full_text)
+    ai_result = analyze_with_gemini(full_text)
 
     push_title = f"🚀 Alerts 更新 ({now_cst.strftime('%H:%M')})"
 
     if ai_result:
+        # AI 成功：推送归纳后的中文内容
         push_bark(push_title, ai_result)
         print("✅ 已推送 AI 归纳内容")
     else:
-        # 保底：推送原始标题
-        backup = "\n".join([f"• {item.splitlines()[0].replace('标题: ', '')}" for item in new_items[:5]])
-        push_bark(push_title + " (原始)", backup)
-        print("⚠️  AI 失败，已推送原始标题")
+        # AI 失败：用 Google Translate 逐条翻译标题后推送
+        print("🌐 AI 不可用，使用 Google Translate 翻译标题...")
+        translated_lines = []
+        for t in new_titles[:8]:  # 最多8条
+            cn = translate_to_chinese(t)
+            translated_lines.append(f"• {cn}")
+            print(f"  ✅ {cn[:50]}")
+
+        backup_body = "\n".join(translated_lines)
+        push_bark(push_title, backup_body)
+        print("✅ 已推送翻译后的标题")
 
     save_seen(seen)
 
